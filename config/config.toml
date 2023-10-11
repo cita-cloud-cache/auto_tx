@@ -1,0 +1,11 @@
+[auto_tx]
+port = 4000
+kms_url = "http://127.0.0.1:3000"
+config_center_url = ""
+
+[auto_tx.log_config]
+max_level = "info"
+filter = "info"
+# rolling_file_path = "./logs"
+service_name = "auto_tx"
+# agent_endpoint = "127.0.0.1:6831"
