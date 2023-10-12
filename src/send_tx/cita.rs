@@ -218,7 +218,7 @@ impl AutoTx for CitaAutoTx {
                         return Err(anyhow!("Invalid version"));
                     }
                     self.tx.version = version;
-
+                    
                     //update hash
                     let tx: CitaTransaction = self.tx.clone().into();
                     let tx_bytes: Vec<u8> = tx.write_to_bytes()?;
@@ -238,7 +238,7 @@ impl AutoTx for CitaAutoTx {
                     self.hash.hash = tx_hash_vec.clone();
                     self.hash.unverified = unverified_tx_vec;
 
-                    Ok(Some(hex::encode(tx_hash_vec)))
+                    Ok(Some(self.get_current_hash()))
                 }
                 (true, false) => {
                     self.store_done(&state.storage, Some("Err: timeout".to_string()))
@@ -299,7 +299,7 @@ impl AutoTx for CitaAutoTx {
             .await;
         if let Ok(chain_info) = res {
             if let ChainType::Cita(cita_client) = chain_info.chain_type {
-                let hash = add_0x(hex::encode(&self.get_current_hash()));
+                let hash = add_0x(self.get_current_hash());
                 // check receipt
                 let result = cita_client
                     .client
@@ -307,7 +307,6 @@ impl AutoTx for CitaAutoTx {
                     .map_err(|_| anyhow!("check get_transaction_receipt failed"))?;
                 match result.result() {
                     Some(_) => {
-                        let hash = self.get_current_hash();
                         info!(
                             "uncheck task: {} check success, hash: {}",
                             self.get_key(),
