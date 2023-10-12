@@ -7,7 +7,7 @@ use crate::send_tx::cita::CitaAutoTx;
 use crate::send_tx::cita_cloud::CitaCloudAutoTx;
 use crate::send_tx::eth::EthAutoTx;
 use crate::storage::{AutoTxStorage, Storage};
-use crate::util::{display_value, parse_data, parse_value};
+use crate::util::{add_0x, display_value, parse_data, parse_value};
 use crate::RequestParams;
 use crate::{chains::*, AutoTxGlobalState};
 use anyhow::anyhow;
@@ -97,12 +97,11 @@ impl Display for TxInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let data_len = self.data.len();
         let data = if data_len > 10 {
-            "0x".to_string()
-                + &hex::encode(&self.data.clone()[..4])
+            add_0x(hex::encode(&self.data.clone()[..4]))
                 + "..."
                 + &hex::encode(&self.data.clone()[(data_len - 4)..data_len])
         } else {
-            "0x".to_string() + &hex::encode(self.data.clone())
+            add_0x(hex::encode(self.data.clone()))
         };
 
         let value_str = hex::encode(self.value.0.clone());
@@ -111,8 +110,8 @@ impl Display for TxInfo {
         write!(
             f,
             "from: {}, to: {}, data: {}, value: {}",
-            "0x".to_string() + &hex::encode(self.from.clone()),
-            "0x".to_string() + &hex::encode(self.to.clone()),
+            add_0x(hex::encode(self.from.clone())),
+            add_0x(hex::encode(self.to.clone())),
             data,
             display_value,
         )
@@ -271,6 +270,6 @@ pub async fn handle_send_tx(
     );
 
     ok(json!({
-        "hash": "0x".to_string() + &hash
+        "hash": add_0x(hash)
     }))
 }

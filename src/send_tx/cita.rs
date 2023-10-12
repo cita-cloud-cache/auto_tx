@@ -5,6 +5,7 @@ use super::AutoTxType;
 use crate::chains::ChainType;
 use crate::chains::Chains;
 use crate::kms::Kms;
+use crate::util::add_0x;
 use crate::util::remove_0x;
 use crate::AutoTxGlobalState;
 use anyhow::anyhow;
@@ -68,12 +69,18 @@ impl From<CitaTransactionForSerde> for CitaTransaction {
     }
 }
 
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct CitaSigned {
+    pub hash: Vec<u8>,
+    pub unverified: Vec<u8>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CitaAutoTx {
     auto_tx_info: AutoTxInfo,
     remain_time: u32,
     tx: CitaTransactionForSerde,
-    hash: Vec<u8>,
+    hash: CitaSigned,
     tag: AutoTxTag,
 }
 
@@ -89,7 +96,7 @@ impl CitaAutoTx {
             auto_tx_info,
             remain_time,
             tx,
-            hash: vec![],
+            hash: CitaSigned::default(),
             tag: AutoTxTag::Unsend,
         }
     }
@@ -114,7 +121,7 @@ impl AutoTx for CitaAutoTx {
     }
 
     fn get_current_hash(&self) -> String {
-        hex::encode(self.hash.clone())
+        hex::encode(self.hash.clone().hash)
     }
 
     fn to_unified_type(&self) -> AutoTxType {
@@ -124,11 +131,11 @@ impl AutoTx for CitaAutoTx {
     async fn estimate_gas(&mut self, chains: &Chains) -> Result<()> {
         let chain_info = chains.get_chain_info(&self.auto_tx_info.chain_name).await?;
         if let ChainType::Cita(cita_client) = chain_info.chain_type {
-            let from_str = format!("0x{}", hex::encode(self.auto_tx_info.tx_info.from.clone()));
+            let from_str = add_0x(hex::encode(self.auto_tx_info.tx_info.from.clone()));
             let from = Some(from_str.as_str());
-            let to_str = format!("0x{}", hex::encode(self.auto_tx_info.tx_info.to.clone()));
+            let to_str = add_0x(hex::encode(self.auto_tx_info.tx_info.to.clone()));
             let to = to_str.as_str();
-            let data_str = format!("0x{}", hex::encode(self.auto_tx_info.tx_info.data.clone()));
+            let data_str = add_0x(hex::encode(self.auto_tx_info.tx_info.data.clone()));
             let data = Some(data_str.as_str());
 
             let resp = cita_client
@@ -215,10 +222,23 @@ impl AutoTx for CitaAutoTx {
                     //update hash
                     let tx: CitaTransaction = self.tx.clone().into();
                     let tx_bytes: Vec<u8> = tx.write_to_bytes()?;
-                    let hash_vec = self.auto_tx_info.account.hash(&tx_bytes);
-                    self.hash = hash_vec.clone();
+                    let message_hash = hex::encode(self.auto_tx_info.account.hash(&tx_bytes));
 
-                    Ok(Some(hex::encode(hash_vec)))
+                    // get sig
+                    let sig = self.auto_tx_info.account.sign(&message_hash).await?;
+
+                    // organize UnverifiedTransaction
+                    let mut unverified_tx = UnverifiedTransaction::new();
+                    let tx: CitaTransaction = self.tx.clone().into();
+                    unverified_tx.set_transaction(tx);
+                    unverified_tx.set_signature(sig);
+                    unverified_tx.set_crypto(Crypto::DEFAULT);
+                    let unverified_tx_vec = unverified_tx.write_to_bytes()?;
+                    let tx_hash_vec = self.auto_tx_info.account.hash(&unverified_tx_vec);
+                    self.hash.hash = tx_hash_vec.clone();
+                    self.hash.unverified = unverified_tx_vec;
+
+                    Ok(Some(hex::encode(tx_hash_vec)))
                 }
                 (true, false) => {
                     self.store_done(&state.storage, Some("Err: timeout".to_string()))
@@ -239,20 +259,7 @@ impl AutoTx for CitaAutoTx {
             .await;
         if let Ok(chain_info) = res {
             if let ChainType::Cita(mut cita_client) = chain_info.chain_type {
-                // get sig
-                let sig = self
-                    .auto_tx_info
-                    .account
-                    .sign(&self.get_current_hash())
-                    .await?;
-
-                // organize UnverifiedTransaction
-                let mut unverified_tx = UnverifiedTransaction::new();
-                let tx: CitaTransaction = self.tx.clone().into();
-                unverified_tx.set_transaction(tx);
-                unverified_tx.set_signature(sig);
-                unverified_tx.set_crypto(Crypto::DEFAULT);
-                let signed_tx = format!("0x{}", hex::encode(unverified_tx.write_to_bytes()?));
+                let signed_tx = add_0x(hex::encode(self.hash.unverified.clone()));
 
                 match cita_client.client.send_signed_transaction(&signed_tx) {
                     Ok(hash_resp) => {
@@ -292,7 +299,7 @@ impl AutoTx for CitaAutoTx {
             .await;
         if let Ok(chain_info) = res {
             if let ChainType::Cita(cita_client) = chain_info.chain_type {
-                let hash = format!("0x{}", hex::encode(&self.hash));
+                let hash = add_0x(hex::encode(&self.get_current_hash()));
                 // check receipt
                 let result = cita_client
                     .client

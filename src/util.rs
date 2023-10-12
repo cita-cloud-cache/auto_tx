@@ -6,6 +6,10 @@ pub fn remove_0x(s: &str) -> &str {
     s.strip_prefix("0x").unwrap_or(s)
 }
 
+pub fn add_0x(s: String) -> String {
+    "0x".to_string() + &s
+}
+
 pub fn parse_value(s: &str) -> Result<Vec<u8>> {
     let s = remove_0x(s);
     if s.len() > 64 {
