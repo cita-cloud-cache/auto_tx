@@ -1,4 +1,4 @@
-use crate::{storage::AutoTxStorage, AutoTxGlobalState, RequestParams};
+use crate::{storage::AutoTxStorage, util::add_0x, AutoTxGlobalState, RequestParams};
 use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::response::IntoResponse;
@@ -21,8 +21,14 @@ pub async fn get_onchain_hash(
         .to_str()?;
 
     let onchain_hash = state.storage.get_done(req_key).await?;
+    let is_success = if onchain_hash.len() == 64 {
+        true
+    } else {
+        false
+    };
 
     ok(json!({
-        "onchain_hash": onchain_hash
+        "is_success": is_success,
+        "onchain_hash": add_0x(onchain_hash)
     }))
 }
