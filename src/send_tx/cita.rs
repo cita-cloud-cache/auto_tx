@@ -218,7 +218,7 @@ impl AutoTx for CitaAutoTx {
                         return Err(anyhow!("Invalid version"));
                     }
                     self.tx.version = version;
-                    
+
                     //update hash
                     let tx: CitaTransaction = self.tx.clone().into();
                     let tx_bytes: Vec<u8> = tx.write_to_bytes()?;
@@ -316,10 +316,14 @@ impl AutoTx for CitaAutoTx {
                     }
                     None => {
                         // check if timeout
+                        let error_info = result
+                            .error()
+                            .map(|e| e.message())
+                            .unwrap_or("no error message".to_string());
                         info!(
                             "uncheck task: {} check failed: {:?}, remain_time: {}",
                             self.get_key(),
-                            result.error(),
+                            error_info,
                             self.get_remain_time()
                         );
                         if self.update_args(&state).await?.is_some() {
