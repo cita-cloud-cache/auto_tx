@@ -252,10 +252,6 @@ impl AutoTx for CitaAutoTx {
             if let ChainType::Cita(mut cita_client) = chain_info.chain_type {
                 let signed_tx = add_0x(hex::encode(self.hash.unverified.clone()));
 
-                cita_client
-                    .client
-                    .send_signed_transaction(&signed_tx)
-                    .unwrap();
                 match cita_client.client.send_signed_transaction(&signed_tx) {
                     Ok(resp) => {
                         if resp.is_ok() {
