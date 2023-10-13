@@ -1,24 +1,17 @@
-use super::AutoTx;
-use super::AutoTxInfo;
-use super::AutoTxTag;
-use super::AutoTxType;
-use crate::chains::ChainType;
-use crate::chains::Chains;
+use super::{AutoTx, AutoTxInfo, AutoTxTag, AutoTxType};
+use crate::chains::{ChainType, Chains};
 use crate::kms::Kms;
 use crate::AutoTxGlobalState;
-use anyhow::anyhow;
-use anyhow::Result;
-use cita_cloud_proto::blockchain::raw_transaction::Tx;
-use cita_cloud_proto::blockchain::RawTransaction;
-use cita_cloud_proto::blockchain::Transaction as CitaCloudlTransaction;
-use cita_cloud_proto::blockchain::UnverifiedTransaction;
-use cita_cloud_proto::blockchain::Witness;
-use cita_cloud_proto::client::ClientOptions;
-use cita_cloud_proto::client::InterceptedSvc;
-use cita_cloud_proto::common::Empty;
-use cita_cloud_proto::common::Hash;
-use cita_cloud_proto::controller::rpc_service_client::RpcServiceClient as ControllerRpcServiceClient;
-use cita_cloud_proto::controller::Flag;
+use anyhow::{anyhow, Result};
+use cita_cloud_proto::blockchain::{
+    raw_transaction::Tx, RawTransaction, Transaction as CitaCloudlTransaction,
+    UnverifiedTransaction, Witness,
+};
+use cita_cloud_proto::client::{ClientOptions, InterceptedSvc};
+use cita_cloud_proto::common::{Empty, Hash};
+use cita_cloud_proto::controller::{
+    rpc_service_client::RpcServiceClient as ControllerRpcServiceClient, Flag,
+};
 use cita_cloud_proto::evm::rpc_service_client::RpcServiceClient as EvmRpcServiceClient;
 use cita_cloud_proto::executor::CallRequest;
 use cita_cloud_proto::retry::RetryClient;

@@ -1,26 +1,18 @@
-use super::AutoTx;
-use super::AutoTxInfo;
-use super::AutoTxTag;
-use super::AutoTxType;
-use crate::chains::ChainType;
-use crate::chains::Chains;
+use super::{AutoTx, AutoTxInfo, AutoTxTag, AutoTxType};
+use crate::chains::{ChainType, Chains};
 use crate::AutoTxGlobalState;
-use anyhow::anyhow;
-use anyhow::Result;
-use ethabi::ethereum_types::H256;
-use ethabi::ethereum_types::U64;
+use anyhow::{anyhow, Result};
+use ethabi::ethereum_types::{H256, U64};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use web3::signing::Key;
-use web3::transports::Http;
-use web3::types::Address;
-use web3::types::Bytes;
-use web3::types::CallRequest;
-use web3::types::SignedTransaction;
-use web3::types::TransactionParameters;
-use web3::types::TransactionRequest;
-use web3::Error;
-use web3::Web3;
+use web3::{
+    signing::Key,
+    transports::Http,
+    types::{
+        Address, Bytes, CallRequest, SignedTransaction, TransactionParameters, TransactionRequest,
+    },
+    Error, Web3,
+};
 
 #[derive(Clone, Debug)]
 pub struct EthClient {

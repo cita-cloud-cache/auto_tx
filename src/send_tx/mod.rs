@@ -2,26 +2,26 @@ pub mod cita;
 pub mod cita_cloud;
 pub mod eth;
 
-use crate::kms::{Account, Kms};
-use crate::send_tx::cita::CitaAutoTx;
-use crate::send_tx::cita_cloud::CitaCloudAutoTx;
-use crate::send_tx::eth::EthAutoTx;
-use crate::storage::{AutoTxStorage, Storage};
-use crate::util::{add_0x, display_value, parse_data, parse_value};
-use crate::RequestParams;
-use crate::{chains::*, AutoTxGlobalState};
-use anyhow::anyhow;
-use anyhow::Result;
-use axum::extract::State;
-use axum::http::HeaderMap;
-use axum::response::IntoResponse;
-use axum::Json;
+use crate::{
+    chains::*,
+    kms::{Account, Kms},
+    send_tx::{cita::CitaAutoTx, cita_cloud::CitaCloudAutoTx, eth::EthAutoTx},
+    storage::{AutoTxStorage, Storage},
+    util::{add_0x, display_value, parse_data, parse_value},
+    AutoTxGlobalState, RequestParams,
+};
+use anyhow::{anyhow, Result};
+use axum::{
+    extract::{Path, State},
+    http::HeaderMap,
+    response::IntoResponse,
+    Json,
+};
 use common_rs::restful::{ok, RESTfulError};
 use ethabi::ethereum_types::U256;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::fmt::Display;
-use std::sync::Arc;
+use std::{fmt::Display, sync::Arc};
 
 #[axum::async_trait]
 pub trait AutoTx: Clone {
@@ -198,6 +198,7 @@ impl AutoTxType {
 
 pub async fn handle_send_tx(
     headers: HeaderMap,
+    Path(chain_name): Path<String>,
     State(state): State<Arc<AutoTxGlobalState>>,
     Json(params): Json<RequestParams>,
 ) -> std::result::Result<impl IntoResponse, RESTfulError> {
@@ -212,9 +213,6 @@ pub async fn handle_send_tx(
     // check params
     if params.user_code.is_empty() {
         return Err(anyhow::anyhow!("user_code missing").into());
-    }
-    if params.chain_name.is_empty() {
-        return Err(anyhow::anyhow!("chain_name missing").into());
     }
     if params.to.is_empty() {
         return Err(anyhow::anyhow!("field \"to\" missing").into());
@@ -233,7 +231,6 @@ pub async fn handle_send_tx(
     };
 
     // get ChainInfo
-    let chain_name = params.chain_name.clone();
     let chain_info = state.chains.get_chain_info(&chain_name).await?;
 
     // get account

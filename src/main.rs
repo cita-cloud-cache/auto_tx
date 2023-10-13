@@ -131,7 +131,7 @@ async fn run(opts: RunOpts) -> Result<()> {
     let state = Arc::new(AutoTxGlobalState::new(config));
 
     let app = Router::new()
-        .route("/api/send_tx", any(handle_send_tx))
+        .route("/api/:chain_name/send_tx", any(handle_send_tx))
         .route("/api/get_onchain_hash", any(get_onchain_hash))
         // .route_layer(middleware::from_fn(log_req))
         .route_layer(middleware::from_fn(handle_http_error))
@@ -188,8 +188,6 @@ async fn run(opts: RunOpts) -> Result<()> {
 pub struct RequestParams {
     #[serde(skip_serializing_if = "String::is_empty")]
     user_code: String,
-    #[serde(skip_serializing_if = "String::is_empty")]
-    chain_name: String,
 
     #[serde(skip_serializing_if = "String::is_empty")]
     to: String,

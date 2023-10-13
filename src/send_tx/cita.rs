@@ -1,23 +1,14 @@
-use super::AutoTx;
-use super::AutoTxInfo;
-use super::AutoTxTag;
-use super::AutoTxType;
-use crate::chains::ChainType;
-use crate::chains::Chains;
+use super::{AutoTx, AutoTxInfo, AutoTxTag, AutoTxType};
+use crate::chains::{ChainType, Chains};
 use crate::kms::Kms;
-use crate::util::add_0x;
-use crate::util::remove_0x;
+use crate::util::{add_0x, remove_0x};
 use crate::AutoTxGlobalState;
-use anyhow::anyhow;
-use anyhow::Result;
-use cita_tool::client::basic::{Client, ClientExt};
-use cita_tool::Crypto;
-use cita_tool::LowerHex;
-use cita_tool::ParamsValue;
-use cita_tool::ProtoMessage;
-use cita_tool::ResponseValue;
-use cita_tool::Transaction as CitaTransaction;
-use cita_tool::UnverifiedTransaction;
+use anyhow::{anyhow, Result};
+use cita_tool::{
+    client::basic::{Client, ClientExt},
+    Crypto, LowerHex, ParamsValue, ProtoMessage, ResponseValue, Transaction as CitaTransaction,
+    UnverifiedTransaction,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -261,16 +252,45 @@ impl AutoTx for CitaAutoTx {
             if let ChainType::Cita(mut cita_client) = chain_info.chain_type {
                 let signed_tx = add_0x(hex::encode(self.hash.unverified.clone()));
 
+                cita_client
+                    .client
+                    .send_signed_transaction(&signed_tx)
+                    .unwrap();
                 match cita_client.client.send_signed_transaction(&signed_tx) {
-                    Ok(hash_resp) => {
-                        warn!("hash_resp: {}", hash_resp);
-                        let hash = self.get_current_hash();
-                        info!(
-                            "unsend task: {} send success, hash: {}",
-                            self.get_key(),
-                            hash
-                        );
-                        self.store_uncheck(&state.storage).await?;
+                    Ok(resp) => {
+                        if resp.is_ok() {
+                            let hash = self.get_current_hash();
+                            info!(
+                                "unsend task: {} send success, hash: {}",
+                                self.get_key(),
+                                hash
+                            );
+                            self.store_uncheck(&state.storage).await?;
+                        } else {
+                            let error_info = resp
+                                .error()
+                                .map(|e| e.message())
+                                .unwrap_or("no message".to_string());
+                            if error_info == "Dup" {
+                                let hash = self.get_current_hash();
+                                info!(
+                                    "unsend task: {} already sent, hash: {}",
+                                    self.get_key(),
+                                    hash
+                                );
+                                self.store_uncheck(&state.storage).await?;
+                            } else {
+                                info!(
+                                    "unsend task: {} send failed: {}, remain_time: {}",
+                                    self.get_key(),
+                                    error_info,
+                                    self.get_remain_time()
+                                );
+                                if self.update_args(&state).await?.is_some() {
+                                    self.store_unsend(&state.storage).await?;
+                                }
+                            }
+                        }
                     }
                     Err(e) => {
                         info!(
@@ -319,7 +339,7 @@ impl AutoTx for CitaAutoTx {
                         let error_info = result
                             .error()
                             .map(|e| e.message())
-                            .unwrap_or("no error message".to_string());
+                            .unwrap_or("not found".to_string());
                         info!(
                             "uncheck task: {} check failed: {:?}, remain_time: {}",
                             self.get_key(),
