@@ -84,7 +84,6 @@ async fn sign_message(user_code: &str, crypto_type: &str, message: &str) -> Resu
         .await
         .unwrap();
     let sig = resp.data.signature;
-    warn!("sig: {}", sig);
 
     if resp.code != 200 {
         return Err(anyhow::anyhow!(resp.message));

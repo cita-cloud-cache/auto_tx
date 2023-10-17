@@ -128,10 +128,15 @@ impl AutoTx for CitaCloudAutoTx {
                 let new_quota = self.tx.quota / 2 * 3;
                 self.tx.quota = new_quota
             } else {
+                let to = if self.auto_tx_info.is_create() {
+                    vec![0u8; 20]
+                } else {
+                    self.auto_tx_info.tx_info.to.clone()
+                };
                 let call = CallRequest {
-                    from: self.auto_tx_info.tx_info.from.clone(),
-                    to: self.auto_tx_info.tx_info.to.clone(),
-                    method: self.auto_tx_info.tx_info.data.clone(),
+                    from: self.auto_tx_info.account.address(),
+                    to,
+                    method: self.tx.data.clone(),
                     args: Vec::new(),
                     height: 0,
                 };
@@ -143,15 +148,14 @@ impl AutoTx for CitaCloudAutoTx {
                     .into_inner()
                     .bytes_quota;
                 let quota = U256::from_big_endian(bytes_quota.as_slice()).as_u64();
-                // self.tx.quota = quota
-                self.tx.quota = 50000
+                self.tx.quota = quota
             }
         }
 
         Ok(())
     }
 
-    async fn update_args(&mut self, state: &AutoTxGlobalState) -> Result<Option<String>> {
+    async fn update_if_timeout(&mut self, state: &AutoTxGlobalState) -> Result<bool> {
         let chain_info = state
             .chains
             .get_chain_info(&self.auto_tx_info.chain_name)
@@ -197,28 +201,31 @@ impl AutoTx for CitaCloudAutoTx {
                     self.tx.version = system_config.version;
                     self.tx.chain_id = system_config.chain_id;
 
-                    //update hash
-                    let tx: CitaCloudlTransaction = self.tx.clone().into();
-                    let tx_bytes = {
-                        let mut buf = Vec::with_capacity(tx.encoded_len());
-                        tx.encode(&mut buf).unwrap();
-                        buf
-                    };
-                    let hash_vec = self.auto_tx_info.account.hash(&tx_bytes);
-                    self.hash = hash_vec.clone();
-
-                    Ok(Some(hex::encode(hash_vec)))
+                    Ok(true)
                 }
                 (true, false) => {
                     self.store_done(&state.storage, Some("Err: timeout".to_string()))
                         .await?;
-                    Ok(None)
+                    Ok(false)
                 }
-                (false, _) => Ok(None),
+                (false, _) => Ok(false),
             }
         } else {
             Err(anyhow!("wrong tx type"))
         }
+    }
+
+    async fn update_current_hash(&mut self, _chains: &Chains) -> Result<String> {
+        let tx: CitaCloudlTransaction = self.tx.clone().into();
+        let tx_bytes = {
+            let mut buf = Vec::with_capacity(tx.encoded_len());
+            tx.encode(&mut buf).unwrap();
+            buf
+        };
+        let hash_vec = self.auto_tx_info.account.hash(&tx_bytes);
+        self.hash = hash_vec.clone();
+
+        Ok(self.get_current_hash())
     }
 
     async fn send(&mut self, state: Arc<AutoTxGlobalState>) -> Result<()> {
@@ -292,7 +299,8 @@ impl AutoTx for CitaCloudAutoTx {
                             e.message(),
                             self.get_remain_time()
                         );
-                        if self.update_args(&state).await?.is_some() {
+                        if self.update_if_timeout(&state).await? {
+                            self.update_current_hash(&state.chains).await?;
                             self.store_unsend(&state.storage).await?;
                         }
                     }
@@ -321,15 +329,44 @@ impl AutoTx for CitaCloudAutoTx {
                     })
                     .await
                 {
-                    Ok(r) => {
-                        let hash = self.get_current_hash();
-                        info!(
-                            "uncheck task: {} check success, hash: {}",
-                            self.get_key(),
-                            hash
-                        );
-                        warn!("cita-cloud receipt: {:?}", r.into_inner());
-                        self.store_done(&state.storage, None).await?;
+                    Ok(resp) => {
+                        let error_message = resp.into_inner().error_message;
+                        match error_message.as_str() {
+                            "" => {
+                                // success
+                                let hash = self.get_current_hash();
+                                info!(
+                                    "uncheck task: {} check success, hash: {}",
+                                    self.get_key(),
+                                    hash
+                                );
+                                self.store_done(&state.storage, None).await?;
+                            }
+                            "Out of quota." => {
+                                // self_update and resend
+                                let hash = self.get_current_hash();
+                                warn!(
+                                    "uncheck task: {} check failed: out of gas, hash: {}, self_update and resend",
+                                    self.get_key(),
+                                    hash
+                                );
+                                self.update_gas(&state.chains, true).await?;
+                                self.update_current_hash(&state.chains).await?;
+                                self.store_unsend(&state.storage).await?;
+                            }
+                            s => {
+                                // record failed
+                                let hash = self.get_current_hash();
+                                warn!(
+                                    "uncheck task: {} check failed: {}, hash: {}",
+                                    self.get_key(),
+                                    s,
+                                    hash
+                                );
+                                self.store_done(&state.storage, Some("execute failed".to_string()))
+                                    .await?;
+                            }
+                        }
                     }
                     Err(e) => {
                         // check if timeout
@@ -339,7 +376,8 @@ impl AutoTx for CitaCloudAutoTx {
                             e.message(),
                             self.get_remain_time()
                         );
-                        if self.update_args(&state).await?.is_some() {
+                        if self.update_if_timeout(&state).await? {
+                            self.update_current_hash(&state.chains).await?;
                             self.store_unsend(&state.storage).await?;
                         }
                     }

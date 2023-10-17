@@ -152,7 +152,6 @@ async fn run(opts: RunOpts) -> Result<()> {
             tokio::time::sleep(tokio::time::Duration::from_secs(process_interval)).await;
             match state_clone.storage.get_all_processing().await {
                 Ok(auto_txs) => {
-                    warn!("get_all_processing: {:?}", auto_txs);
                     for mut auto_tx in auto_txs {
                         let state = state_clone.clone();
                         let tag = auto_tx.get_tag();

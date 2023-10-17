@@ -40,7 +40,6 @@ pub trait AutoTx: Clone {
         let key = &self.get_key();
         let unified_type = self.to_unified_type();
         storage.insert_processing(key, unified_type.clone()).await?;
-        warn!("store_unsend: {:?}", unified_type);
         Ok(())
     }
 
@@ -55,11 +54,9 @@ pub trait AutoTx: Clone {
     async fn store_done(&mut self, storage: &Storage, err: Option<String>) -> Result<()> {
         let key = &self.get_key();
         if let Some(e) = err {
-            warn!("task: {} failed: {}", self.get_key(), e);
             storage.insert_done(key, e).await?;
         } else {
             let hash = self.get_current_hash();
-            info!("task: {} success: {}", self.get_key(), hash);
             storage.insert_done(key, hash).await?;
         }
         Ok(())
@@ -67,17 +64,19 @@ pub trait AutoTx: Clone {
 
     async fn update_gas(&mut self, chains: &Chains, self_update: bool) -> Result<()>;
 
-    async fn update_args(&mut self, state: &AutoTxGlobalState) -> Result<Option<String>>;
+    async fn update_if_timeout(&mut self, state: &AutoTxGlobalState) -> Result<bool>;
+
+    async fn update_current_hash(&mut self, chains: &Chains) -> Result<String>;
 
     async fn init_unsend(&mut self, state: Arc<AutoTxGlobalState>) -> Result<String> {
         self.update_gas(&state.chains, false).await?;
-        let hash = self
-            .update_args(&state)
-            .await?
-            .ok_or(anyhow!("init failed"))?;
-        self.store_unsend(&state.storage).await?;
-
-        Ok(hash)
+        if self.update_if_timeout(&state).await? {
+            let hash = self.update_current_hash(&state.chains).await?;
+            self.store_unsend(&state.storage).await?;
+            Ok(hash)
+        } else {
+            Err(anyhow!("init failed: update_if_timeout is false"))
+        }
     }
 
     async fn send(&mut self, state: Arc<AutoTxGlobalState>) -> Result<()>;
@@ -151,6 +150,10 @@ impl AutoTxInfo {
             tx_info,
         }
     }
+
+    pub fn is_create(&self) -> bool {
+        self.tx_info.to.is_empty()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -180,10 +183,7 @@ impl AutoTxType {
         match self {
             AutoTxType::CitaCloud(auto_tx) => auto_tx.send(state).await,
             AutoTxType::Cita(auto_tx) => auto_tx.send(state).await,
-            AutoTxType::Eth(auto_tx) => {
-                warn!("get eth unsend");
-                auto_tx.send(state).await
-            }
+            AutoTxType::Eth(auto_tx) => auto_tx.send(state).await,
         }
     }
 
@@ -202,12 +202,12 @@ pub async fn handle_send_tx(
     State(state): State<Arc<AutoTxGlobalState>>,
     Json(params): Json<RequestParams>,
 ) -> std::result::Result<impl IntoResponse, RESTfulError> {
-    warn!("params: {:?}", params);
+    debug!("params: {:?}", params);
 
     // get req_key
     let req_key = headers
         .get("key")
-        .ok_or(anyhow::anyhow!("no key in header"))?
+        .ok_or(anyhow::anyhow!("no req_key in header"))?
         .to_str()?;
 
     // check params
@@ -235,11 +235,7 @@ pub async fn handle_send_tx(
 
     // convert tx field
     let from = account.address();
-    let to = if params.to.is_empty() {
-        vec![0u8; 20]
-    } else {
-        parse_data(&params.to)?
-    };
+    let to = parse_data(&params.to)?;
     let data = parse_data(&params.data)?;
     let value_u256 = U256::from_dec_str(&params.value)?;
     let value = parse_value(&params.value)?;

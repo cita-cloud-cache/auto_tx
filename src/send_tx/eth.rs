@@ -52,9 +52,14 @@ pub struct EthAutoTx {
 
 impl EthAutoTx {
     pub fn new(auto_tx_info: AutoTxInfo) -> Self {
+        let to = if auto_tx_info.is_create() {
+            None
+        } else {
+            Some(Address::from_slice(&auto_tx_info.tx_info.to))
+        };
         let tx = TransactionRequest {
             from: Address::from_slice(&auto_tx_info.tx_info.from),
-            to: Some(Address::from_slice(&auto_tx_info.tx_info.to)),
+            to,
             value: Some(auto_tx_info.tx_info.value.1),
             data: Some(Bytes(auto_tx_info.tx_info.data.clone())),
             transaction_type: Some(U64::from(2)),
@@ -114,45 +119,54 @@ impl AutoTx for EthAutoTx {
         Ok(())
     }
 
-    async fn update_args(&mut self, state: &AutoTxGlobalState) -> Result<Option<String>> {
+    async fn update_if_timeout(&mut self, state: &AutoTxGlobalState) -> Result<bool> {
+        warn!("update_if_timeout");
         let chain_info = state
             .chains
             .get_chain_info(&self.auto_tx_info.chain_name)
             .await?;
         if let ChainType::Eth(client) = chain_info.chain_type {
             let current_nonce = self.tx.nonce;
+            warn!("current_nonce: {current_nonce:?}");
             let from = self.auto_tx_info.account.address();
             let target_nonce = client.web3.eth().transaction_count(from, None).await?;
+            warn!("target_nonce: {target_nonce}");
 
             // update if timeout
             if current_nonce.is_none() || current_nonce.unwrap() < target_nonce {
                 // update nonce
                 self.tx.nonce = Some(target_nonce);
-
-                // update hash
-                let tx_params = TransactionParameters {
-                    nonce: self.tx.nonce,
-                    to: self.tx.to,
-                    gas: self.tx.gas.unwrap_or_default(),
-                    value: self.tx.value.unwrap_or_default(),
-                    data: self.tx.data.clone().unwrap_or_default(),
-                    transaction_type: self.tx.transaction_type,
-                    ..Default::default()
-                };
-
-                let signed_tx = client
-                    .web3
-                    .accounts()
-                    .sign_transaction(tx_params, self.auto_tx_info.account.clone())
-                    .await?;
-                warn!("signed_tx: {:?}", signed_tx);
-                let hash = hex::encode(signed_tx.transaction_hash.0);
-                self.hash = signed_tx.into();
-
-                Ok(Some(hash))
+                warn!("true new_nonce: {:?}", self.tx.nonce);
+                Ok(true)
             } else {
-                Ok(None)
+                warn!("false");
+                Ok(false)
             }
+        } else {
+            Err(anyhow!("wrong tx type"))
+        }
+    }
+
+    async fn update_current_hash(&mut self, chains: &Chains) -> Result<String> {
+        let chain_info = chains.get_chain_info(&self.auto_tx_info.chain_name).await?;
+        if let ChainType::Eth(client) = chain_info.chain_type {
+            let tx_params = TransactionParameters {
+                nonce: self.tx.nonce,
+                to: self.tx.to,
+                gas: self.tx.gas.unwrap_or_default(),
+                value: self.tx.value.unwrap_or_default(),
+                data: self.tx.data.clone().unwrap_or_default(),
+                transaction_type: self.tx.transaction_type,
+                ..Default::default()
+            };
+
+            let signed_tx = client
+                .web3
+                .accounts()
+                .sign_transaction(tx_params, self.auto_tx_info.account.clone())
+                .await?;
+            self.hash = signed_tx.into();
+            Ok(self.get_current_hash())
         } else {
             Err(anyhow!("wrong tx type"))
         }
@@ -197,7 +211,8 @@ impl AutoTx for EthAutoTx {
                             }
                         }
                         info!("unsend task: {} send failed: {}", self.get_key(), e);
-                        if self.update_args(&state).await?.is_some() {
+                        if self.update_if_timeout(&state).await? {
+                            self.update_current_hash(&state.chains).await?;
                             self.store_unsend(&state.storage).await?;
                         }
                     }
@@ -225,26 +240,53 @@ impl AutoTx for EthAutoTx {
                 {
                     Ok(result) => match result {
                         Some(r) => {
-                            // match (r.status, r.gas_used) {
-                            //     (Some(status), _) if status == U64::from(1) => {
-                            //         // success
-                            //     },
-                            //     (None, None) => todo!(),
-                            //     (None, Some(_)) => todo!(),
-                            //     (Some(_), Some(_)) => todo!(),
-                            // }
-                            let hash = self.get_current_hash();
-                            info!(
-                                "uncheck task: {} check success, hash: {}",
-                                self.get_key(),
-                                hash
-                            );
-                            self.store_done(&state.storage, None).await?;
+                            match (r.status, r.gas_used) {
+                                (Some(status), _) if status == U64::from(1) => {
+                                    // success
+                                    let hash = self.get_current_hash();
+                                    info!(
+                                        "uncheck task: {} check success, hash: {}",
+                                        self.get_key(),
+                                        hash
+                                    );
+                                    self.store_done(&state.storage, None).await?;
+                                }
+                                (Some(status), Some(used))
+                                    if status == U64::from(0) && used == self.tx.gas.unwrap() =>
+                                {
+                                    // self_update and resend
+                                    let hash = self.get_current_hash();
+                                    warn!(
+                                        "uncheck task: {} check failed: out of gas, hash: {}, self_update and resend",
+                                        self.get_key(),
+                                        hash
+                                    );
+                                    self.update_gas(&state.chains, true).await?;
+                                    // self.update_if_timeout(&state).await?;
+                                    self.update_current_hash(&state.chains).await?;
+                                    self.store_unsend(&state.storage).await?;
+                                }
+                                _ => {
+                                    // record failed
+                                    let hash = self.get_current_hash();
+                                    warn!(
+                                        "uncheck task: {} check failed: Err: execute failed, hash: {}",
+                                        self.get_key(),
+                                        hash
+                                    );
+                                    self.store_done(
+                                        &state.storage,
+                                        Some("execute failed".to_string()),
+                                    )
+                                    .await?;
+                                }
+                            }
                         }
                         None => {
                             // check if timeout
-                            info!("uncheck task: {} check failed: Not Found", self.get_key());
-                            if self.update_args(&state).await?.is_some() {
+                            info!("uncheck task: {} check failed: not found", self.get_key());
+                            if self.update_if_timeout(&state).await? {
+                                self.update_current_hash(&state.chains).await?;
                                 self.store_unsend(&state.storage).await?;
                             }
                         }
@@ -256,7 +298,8 @@ impl AutoTx for EthAutoTx {
                             self.get_key(),
                             e
                         );
-                        if self.update_args(&state).await?.is_some() {
+                        if self.update_if_timeout(&state).await? {
+                            self.update_current_hash(&state.chains).await?;
                             self.store_unsend(&state.storage).await?;
                         }
                     }

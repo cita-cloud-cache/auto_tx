@@ -123,8 +123,10 @@ impl AutoTx for CitaAutoTx {
         let chain_info = chains.get_chain_info(&self.auto_tx_info.chain_name).await?;
         if let ChainType::Cita(cita_client) = chain_info.chain_type {
             if self_update {
-                let new_quota = self.tx.quota / 2 * 3;
+                let new_quota = self.tx.quota * 2;
                 self.tx.quota = new_quota
+            } else if self.auto_tx_info.is_create() {
+                self.tx.quota = 3_000_000;
             } else {
                 let from_str = add_0x(hex::encode(self.auto_tx_info.tx_info.from.clone()));
                 let from = Some(from_str.as_str());
@@ -145,8 +147,7 @@ impl AutoTx for CitaAutoTx {
                         .map_err(|_| anyhow!("estimate_gas estimate_quota failed"))?;
                     if let Some(ResponseValue::Singe(ParamsValue::String(quota))) = resp.result() {
                         let quota = u64::from_str_radix(remove_0x(&quota), 16)?;
-                        // self.tx.quota = quota / 2 * 3;
-                        self.tx.quota = 50000;
+                        self.tx.quota = quota / 2 * 3;
                     }
                 }
             }
@@ -155,7 +156,7 @@ impl AutoTx for CitaAutoTx {
         Ok(())
     }
 
-    async fn update_args(&mut self, state: &AutoTxGlobalState) -> Result<Option<String>> {
+    async fn update_if_timeout(&mut self, state: &AutoTxGlobalState) -> Result<bool> {
         let chain_info = state
             .chains
             .get_chain_info(&self.auto_tx_info.chain_name)
@@ -216,37 +217,40 @@ impl AutoTx for CitaAutoTx {
                     }
                     self.tx.version = version;
 
-                    //update hash
-                    let tx: CitaTransaction = self.tx.clone().into();
-                    let tx_bytes: Vec<u8> = tx.write_to_bytes()?;
-                    let message_hash = hex::encode(self.auto_tx_info.account.hash(&tx_bytes));
-
-                    // get sig
-                    let sig = self.auto_tx_info.account.sign(&message_hash).await?;
-
-                    // organize UnverifiedTransaction
-                    let mut unverified_tx = UnverifiedTransaction::new();
-                    let tx: CitaTransaction = self.tx.clone().into();
-                    unverified_tx.set_transaction(tx);
-                    unverified_tx.set_signature(sig);
-                    unverified_tx.set_crypto(Crypto::DEFAULT);
-                    let unverified_tx_vec = unverified_tx.write_to_bytes()?;
-                    let tx_hash_vec = self.auto_tx_info.account.hash(&unverified_tx_vec);
-                    self.hash.hash = tx_hash_vec.clone();
-                    self.hash.unverified = unverified_tx_vec;
-
-                    Ok(Some(self.get_current_hash()))
+                    Ok(true)
                 }
                 (true, false) => {
                     self.store_done(&state.storage, Some("Err: timeout".to_string()))
                         .await?;
-                    Ok(None)
+                    Ok(false)
                 }
-                (false, _) => Ok(None),
+                (false, _) => Ok(false),
             }
         } else {
             Err(anyhow!("wrong tx type"))
         }
+    }
+
+    async fn update_current_hash(&mut self, _chains: &Chains) -> Result<String> {
+        let tx: CitaTransaction = self.tx.clone().into();
+        let tx_bytes: Vec<u8> = tx.write_to_bytes()?;
+        let message_hash = hex::encode(self.auto_tx_info.account.hash(&tx_bytes));
+
+        // get sig
+        let sig = self.auto_tx_info.account.sign(&message_hash).await?;
+
+        // organize UnverifiedTransaction
+        let mut unverified_tx = UnverifiedTransaction::new();
+        let tx: CitaTransaction = self.tx.clone().into();
+        unverified_tx.set_transaction(tx);
+        unverified_tx.set_signature(sig);
+        unverified_tx.set_crypto(Crypto::DEFAULT);
+        let unverified_tx_vec = unverified_tx.write_to_bytes()?;
+        let tx_hash_vec = self.auto_tx_info.account.hash(&unverified_tx_vec);
+        self.hash.hash = tx_hash_vec.clone();
+        self.hash.unverified = unverified_tx_vec;
+
+        Ok(self.get_current_hash())
     }
 
     async fn send(&mut self, state: Arc<AutoTxGlobalState>) -> Result<()> {
@@ -288,7 +292,8 @@ impl AutoTx for CitaAutoTx {
                                     error_info,
                                     self.get_remain_time()
                                 );
-                                if self.update_args(&state).await?.is_some() {
+                                if self.update_if_timeout(&state).await? {
+                                    self.update_current_hash(&state.chains).await?;
                                     self.store_unsend(&state.storage).await?;
                                 }
                             }
@@ -301,7 +306,8 @@ impl AutoTx for CitaAutoTx {
                             e,
                             self.get_remain_time()
                         );
-                        if self.update_args(&state).await?.is_some() {
+                        if self.update_if_timeout(&state).await? {
+                            self.update_current_hash(&state.chains).await?;
                             self.store_unsend(&state.storage).await?;
                         }
                     }
@@ -328,14 +334,54 @@ impl AutoTx for CitaAutoTx {
                     .get_transaction_receipt(&hash)
                     .map_err(|_| anyhow!("check get_transaction_receipt failed"))?;
                 match result.result() {
-                    Some(r) => {
-                        info!(
-                            "uncheck task: {} check success, hash: {}",
-                            self.get_key(),
-                            hash
-                        );
-                        warn!("cita receipt: {:?}", r);
-                        self.store_done(&state.storage, None).await?;
+                    Some(resp) => {
+                        if let ResponseValue::Map(map) = resp {
+                            let error_message = map
+                                .get("errorMessage")
+                                .map(|e| e.to_string())
+                                .unwrap_or_default();
+                            match error_message.as_str() {
+                                "null" => {
+                                    // success
+                                    let hash = self.get_current_hash();
+                                    info!(
+                                        "uncheck task: {} check success, hash: {}",
+                                        self.get_key(),
+                                        hash
+                                    );
+                                    self.store_done(&state.storage, None).await?;
+                                }
+                                "\"Out of quota.\"" => {
+                                    // self_update and resend
+                                    let hash = self.get_current_hash();
+                                    warn!(
+                                        "uncheck task: {} check failed: out of gas, hash: {}, self_update and resend",
+                                        self.get_key(),
+                                        hash
+                                    );
+                                    self.update_gas(&state.chains, true).await?;
+                                    self.update_current_hash(&state.chains).await?;
+                                    self.store_unsend(&state.storage).await?;
+                                }
+                                s => {
+                                    // record failed
+                                    let hash = self.get_current_hash();
+                                    warn!(
+                                        "uncheck task: {} check failed: {}, hash: {}",
+                                        self.get_key(),
+                                        s,
+                                        hash
+                                    );
+                                    self.store_done(
+                                        &state.storage,
+                                        Some("execute failed".to_string()),
+                                    )
+                                    .await?;
+                                }
+                            }
+                        } else {
+                            unreachable!("unwrap cita receipt failed")
+                        }
                     }
                     None => {
                         // check if timeout
@@ -349,7 +395,8 @@ impl AutoTx for CitaAutoTx {
                             error_info,
                             self.get_remain_time()
                         );
-                        if self.update_args(&state).await?.is_some() {
+                        if self.update_if_timeout(&state).await? {
+                            self.update_current_hash(&state.chains).await?;
                             self.store_unsend(&state.storage).await?;
                         }
                     }
