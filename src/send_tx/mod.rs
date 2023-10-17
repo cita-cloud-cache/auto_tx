@@ -65,12 +65,12 @@ pub trait AutoTx: Clone {
         Ok(())
     }
 
-    async fn estimate_gas(&mut self, chains: &Chains) -> Result<()>;
+    async fn update_gas(&mut self, chains: &Chains, self_update: bool) -> Result<()>;
 
     async fn update_args(&mut self, state: &AutoTxGlobalState) -> Result<Option<String>>;
 
     async fn init_unsend(&mut self, state: Arc<AutoTxGlobalState>) -> Result<String> {
-        self.estimate_gas(&state.chains).await?;
+        self.update_gas(&state.chains, false).await?;
         let hash = self
             .update_args(&state)
             .await?
@@ -214,9 +214,6 @@ pub async fn handle_send_tx(
     if params.user_code.is_empty() {
         return Err(anyhow::anyhow!("user_code missing").into());
     }
-    if params.to.is_empty() {
-        return Err(anyhow::anyhow!("field \"to\" missing").into());
-    }
     if params.data.is_empty() {
         return Err(anyhow::anyhow!("field \"data\" missing").into());
     }
@@ -238,7 +235,11 @@ pub async fn handle_send_tx(
 
     // convert tx field
     let from = account.address();
-    let to = parse_data(&params.to)?;
+    let to = if params.to.is_empty() {
+        vec![0u8; 20]
+    } else {
+        parse_data(&params.to)?
+    };
     let data = parse_data(&params.data)?;
     let value_u256 = U256::from_dec_str(&params.value)?;
     let value = parse_value(&params.value)?;

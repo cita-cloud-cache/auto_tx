@@ -3,7 +3,6 @@ use cita_tool::{Encryption, Hashable};
 use ethabi::ethereum_types::H256;
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
-// use tiny_keccak::{Hasher, Keccak};
 use web3::{
     signing::{Key, Signature, SigningError},
     types::Address,
@@ -93,20 +92,6 @@ async fn sign_message(user_code: &str, crypto_type: &str, message: &str) -> Resu
 
     parse_data(&sig)
 }
-
-// fn keccak_hash(input: &[u8]) -> Vec<u8> {
-//     let mut result = [0u8; 32];
-//     let mut keccak = Keccak::v256();
-//     keccak.update(input);
-//     keccak.finalize(&mut result);
-//     result.to_vec()
-// }
-
-// fn sm3_hash(input: &[u8]) -> Vec<u8> {
-//     let mut result = [0u8; 32];
-//     result.copy_from_slice(libsm::sm3::hash::Sm3Hash::new(input).get_hash().as_ref());
-//     result.to_vec()
-// }
 
 #[axum::async_trait]
 pub trait Kms {

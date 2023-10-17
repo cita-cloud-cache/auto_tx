@@ -119,29 +119,35 @@ impl AutoTx for CitaAutoTx {
         AutoTxType::Cita(self.clone())
     }
 
-    async fn estimate_gas(&mut self, chains: &Chains) -> Result<()> {
+    async fn update_gas(&mut self, chains: &Chains, self_update: bool) -> Result<()> {
         let chain_info = chains.get_chain_info(&self.auto_tx_info.chain_name).await?;
         if let ChainType::Cita(cita_client) = chain_info.chain_type {
-            let from_str = add_0x(hex::encode(self.auto_tx_info.tx_info.from.clone()));
-            let from = Some(from_str.as_str());
-            let to_str = add_0x(hex::encode(self.auto_tx_info.tx_info.to.clone()));
-            let to = to_str.as_str();
-            let data_str = add_0x(hex::encode(self.auto_tx_info.tx_info.data.clone()));
-            let data = Some(data_str.as_str());
+            if self_update {
+                let new_quota = self.tx.quota / 2 * 3;
+                self.tx.quota = new_quota
+            } else {
+                let from_str = add_0x(hex::encode(self.auto_tx_info.tx_info.from.clone()));
+                let from = Some(from_str.as_str());
+                let to_str = add_0x(hex::encode(self.auto_tx_info.tx_info.to.clone()));
+                let to = to_str.as_str();
+                let data_str = add_0x(hex::encode(self.auto_tx_info.tx_info.data.clone()));
+                let data = Some(data_str.as_str());
 
-            let resp = cita_client
-                .client
-                .get_block_number()
-                .map_err(|_| anyhow!("estimate_gas get_block_number failed"))?;
-
-            if let Some(ResponseValue::Singe(ParamsValue::String(height))) = resp.result() {
                 let resp = cita_client
                     .client
-                    .estimate_quota(from, to, data, &height)
-                    .map_err(|_| anyhow!("estimate_gas estimate_quota failed"))?;
-                if let Some(ResponseValue::Singe(ParamsValue::String(quota))) = resp.result() {
-                    let quota = u64::from_str_radix(remove_0x(&quota), 16)?;
-                    self.tx.quota = quota / 2 * 3;
+                    .get_block_number()
+                    .map_err(|_| anyhow!("estimate_gas get_block_number failed"))?;
+
+                if let Some(ResponseValue::Singe(ParamsValue::String(height))) = resp.result() {
+                    let resp = cita_client
+                        .client
+                        .estimate_quota(from, to, data, &height)
+                        .map_err(|_| anyhow!("estimate_gas estimate_quota failed"))?;
+                    if let Some(ResponseValue::Singe(ParamsValue::String(quota))) = resp.result() {
+                        let quota = u64::from_str_radix(remove_0x(&quota), 16)?;
+                        // self.tx.quota = quota / 2 * 3;
+                        self.tx.quota = 50000;
+                    }
                 }
             }
         }
@@ -322,12 +328,13 @@ impl AutoTx for CitaAutoTx {
                     .get_transaction_receipt(&hash)
                     .map_err(|_| anyhow!("check get_transaction_receipt failed"))?;
                 match result.result() {
-                    Some(_) => {
+                    Some(r) => {
                         info!(
                             "uncheck task: {} check success, hash: {}",
                             self.get_key(),
                             hash
                         );
+                        warn!("cita receipt: {:?}", r);
                         self.store_done(&state.storage, None).await?;
                     }
                     None => {

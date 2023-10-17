@@ -91,19 +91,24 @@ impl AutoTx for EthAutoTx {
         AutoTxType::Eth(self.clone())
     }
 
-    async fn estimate_gas(&mut self, chains: &Chains) -> Result<()> {
+    async fn update_gas(&mut self, chains: &Chains, self_update: bool) -> Result<()> {
         let chain_info = chains.get_chain_info(&self.auto_tx_info.chain_name).await?;
         if let ChainType::Eth(client) = chain_info.chain_type {
-            let call_req = CallRequest {
-                from: Some(self.tx.from),
-                to: self.tx.to,
-                value: self.tx.value,
-                data: self.tx.data.clone(),
-                transaction_type: self.tx.transaction_type,
-                ..Default::default()
-            };
-            let gas = client.web3.eth().estimate_gas(call_req, None).await?;
-            self.tx.gas = Some(gas / 2 * 3)
+            if self_update {
+                let new_gas = self.tx.gas.unwrap() / 2 * 3;
+                self.tx.gas = Some(new_gas)
+            } else {
+                let call_req = CallRequest {
+                    from: Some(self.tx.from),
+                    to: self.tx.to,
+                    value: self.tx.value,
+                    data: self.tx.data.clone(),
+                    transaction_type: self.tx.transaction_type,
+                    ..Default::default()
+                };
+                let gas = client.web3.eth().estimate_gas(call_req, None).await?;
+                self.tx.gas = Some(gas / 2 * 3)
+            }
         }
 
         Ok(())
@@ -212,26 +217,49 @@ impl AutoTx for EthAutoTx {
             .await;
         if let Ok(chain_info) = res {
             if let ChainType::Eth(client) = chain_info.chain_type {
-                if client
+                match client
                     .web3
                     .eth()
                     .transaction_receipt(self.hash.transaction_hash)
-                    .await?
-                    .is_some()
+                    .await
                 {
-                    let hash = self.get_current_hash();
-                    info!(
-                        "uncheck task: {} check success, hash: {}",
-                        self.get_key(),
-                        hash
-                    );
-                    self.store_done(&state.storage, None).await?;
-                }
-            } else {
-                // check if timeout
-                info!("uncheck task: {} check failed", self.get_key(),);
-                if self.update_args(&state).await?.is_some() {
-                    self.store_unsend(&state.storage).await?;
+                    Ok(result) => match result {
+                        Some(r) => {
+                            // match (r.status, r.gas_used) {
+                            //     (Some(status), _) if status == U64::from(1) => {
+                            //         // success
+                            //     },
+                            //     (None, None) => todo!(),
+                            //     (None, Some(_)) => todo!(),
+                            //     (Some(_), Some(_)) => todo!(),
+                            // }
+                            let hash = self.get_current_hash();
+                            info!(
+                                "uncheck task: {} check success, hash: {}",
+                                self.get_key(),
+                                hash
+                            );
+                            self.store_done(&state.storage, None).await?;
+                        }
+                        None => {
+                            // check if timeout
+                            info!("uncheck task: {} check failed: Not Found", self.get_key());
+                            if self.update_args(&state).await?.is_some() {
+                                self.store_unsend(&state.storage).await?;
+                            }
+                        }
+                    },
+                    Err(e) => {
+                        // check if timeout
+                        info!(
+                            "uncheck task: {} transaction_receipt failed: {}",
+                            self.get_key(),
+                            e
+                        );
+                        if self.update_args(&state).await?.is_some() {
+                            self.store_unsend(&state.storage).await?;
+                        }
+                    }
                 }
             }
 

@@ -121,25 +121,31 @@ impl AutoTx for CitaCloudAutoTx {
         AutoTxType::CitaCloud(self.clone())
     }
 
-    async fn estimate_gas(&mut self, chains: &Chains) -> Result<()> {
+    async fn update_gas(&mut self, chains: &Chains, self_update: bool) -> Result<()> {
         let chain_info = chains.get_chain_info(&self.auto_tx_info.chain_name).await?;
         if let ChainType::CitaCloud(mut client) = chain_info.chain_type {
-            let call = CallRequest {
-                from: self.auto_tx_info.tx_info.from.clone(),
-                to: self.auto_tx_info.tx_info.to.clone(),
-                method: self.auto_tx_info.tx_info.data.clone(),
-                args: Vec::new(),
-                height: 0,
-            };
-            let bytes_quota = client
-                .evm_client
-                .get_client_mut()
-                .estimate_quota(call)
-                .await?
-                .into_inner()
-                .bytes_quota;
-            let quota = U256::from_big_endian(bytes_quota.as_slice()).as_u64();
-            self.tx.quota = quota / 2 * 3
+            if self_update {
+                let new_quota = self.tx.quota / 2 * 3;
+                self.tx.quota = new_quota
+            } else {
+                let call = CallRequest {
+                    from: self.auto_tx_info.tx_info.from.clone(),
+                    to: self.auto_tx_info.tx_info.to.clone(),
+                    method: self.auto_tx_info.tx_info.data.clone(),
+                    args: Vec::new(),
+                    height: 0,
+                };
+                let bytes_quota = client
+                    .evm_client
+                    .get_client_mut()
+                    .estimate_quota(call)
+                    .await?
+                    .into_inner()
+                    .bytes_quota;
+                let quota = U256::from_big_endian(bytes_quota.as_slice()).as_u64();
+                // self.tx.quota = quota
+                self.tx.quota = 50000
+            }
         }
 
         Ok(())
@@ -315,13 +321,14 @@ impl AutoTx for CitaCloudAutoTx {
                     })
                     .await
                 {
-                    Ok(_) => {
+                    Ok(r) => {
                         let hash = self.get_current_hash();
                         info!(
                             "uncheck task: {} check success, hash: {}",
                             self.get_key(),
                             hash
                         );
+                        warn!("cita-cloud receipt: {:?}", r.into_inner());
                         self.store_done(&state.storage, None).await?;
                     }
                     Err(e) => {
