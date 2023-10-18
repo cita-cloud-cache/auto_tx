@@ -12,7 +12,6 @@ use cita_tool::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-const CITA_BLOCK_INTERVAL: u64 = 3;
 const CITA_BLOCK_LIMIT: u64 = 88;
 
 #[derive(Clone)]
@@ -25,6 +24,44 @@ impl CitaClient {
         let client = Client::new();
         let client = client.set_uri(url);
         Ok(Self { client })
+    }
+
+    fn get_block_interval(&self) -> Result<u64> {
+        let resp = self
+            .client
+            .get_metadata("latest")
+            .map_err(|_| anyhow!("get_block_interval failed"))?;
+
+        if let Some(ResponseValue::Map(map)) = resp.result() {
+            let block_interval_str = map
+                .get("blockInterval")
+                .map(|p| p.to_string())
+                .unwrap_or_default();
+            let block_interval = u64::from_str_radix(&block_interval_str, 10)? / 1000;
+            Ok(block_interval)
+        } else {
+            Err(anyhow!("get_block_interval parse failed"))
+        }
+    }
+
+    fn get_gas_limit(&self) -> Result<u64> {
+        let resp = self
+            .client
+            .call(
+                None,
+                "0xffffffffffffffffffffffffffffffffff020003",
+                Some("0x0bc8982f"),
+                "latest",
+                false,
+            )
+            .map_err(|_| anyhow!("get_gas_limit failed"))?;
+        if let Some(ResponseValue::Singe(gas_limit)) = resp.result() {
+            let gas_limit_str = gas_limit.to_string();
+            let gas_limit = u64::from_str_radix(remove_0x(&gas_limit_str), 16).unwrap();
+            Ok(gas_limit)
+        } else {
+            Err(anyhow!("get_gas_limit parse failed"))
+        }
     }
 }
 
@@ -123,7 +160,8 @@ impl AutoTx for CitaAutoTx {
         let chain_info = chains.get_chain_info(&self.auto_tx_info.chain_name).await?;
         if let ChainType::Cita(cita_client) = chain_info.chain_type {
             if self_update {
-                let new_quota = self.tx.quota * 2;
+                let quota_limit = cita_client.get_gas_limit()?;
+                let new_quota = quota_limit.min(self.tx.quota * 2);
                 self.tx.quota = new_quota
             } else if self.auto_tx_info.is_create() {
                 self.tx.quota = 3_000_000;
@@ -166,11 +204,11 @@ impl AutoTx for CitaAutoTx {
                 .client
                 .get_current_height()
                 .map_err(|_| anyhow!("update_args get_current_height failed"))?;
+            let block_interval = cita_client.get_block_interval()?;
 
             // update remain_time
             if current_height > self.tx.valid_until_block && self.tx.valid_until_block != 0 {
-                let offset =
-                    ((current_height - self.tx.valid_until_block) * CITA_BLOCK_INTERVAL) as u32;
+                let offset = ((current_height - self.tx.valid_until_block) * block_interval) as u32;
                 self.remain_time = if self.remain_time > offset {
                     self.remain_time - offset
                 } else {
@@ -185,12 +223,12 @@ impl AutoTx for CitaAutoTx {
 
             match (is_timeout, has_remain_time) {
                 (true, true) => {
-                    let remain_block = self.remain_time / CITA_BLOCK_INTERVAL as u32 + 1;
+                    let remain_block = self.remain_time / block_interval as u32 + 1;
                     let valid_until_block = if (remain_block as u64) < CITA_BLOCK_LIMIT {
                         self.remain_time = 0;
                         current_height + remain_block as u64
                     } else {
-                        self.remain_time -= 20 * CITA_BLOCK_INTERVAL as u32;
+                        self.remain_time -= 20 * block_interval as u32;
                         current_height + 20
                     };
                     self.tx.valid_until_block = valid_until_block;

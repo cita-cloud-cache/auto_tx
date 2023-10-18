@@ -38,6 +38,13 @@ impl CitaCloudClient {
             evm_client,
         })
     }
+
+    async fn get_gas_limit(&mut self) -> Result<u64> {
+        let client = self.controller_client.get_client_mut();
+        let system_config = client.get_system_config(Empty {}).await?.into_inner();
+        let gas_limit = system_config.quota_limit as u64;
+        Ok(gas_limit)
+    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -125,7 +132,8 @@ impl AutoTx for CitaCloudAutoTx {
         let chain_info = chains.get_chain_info(&self.auto_tx_info.chain_name).await?;
         if let ChainType::CitaCloud(mut client) = chain_info.chain_type {
             if self_update {
-                let new_quota = self.tx.quota / 2 * 3;
+                let quota_limit = client.get_gas_limit().await?;
+                let new_quota = quota_limit.min(self.tx.quota / 2 * 3);
                 self.tx.quota = new_quota
             } else {
                 let to = if self.auto_tx_info.is_create() {

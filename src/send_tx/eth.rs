@@ -5,11 +5,13 @@ use anyhow::{anyhow, Result};
 use ethabi::ethereum_types::{H256, U64};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use web3::types::{BlockId, BlockNumber};
 use web3::{
     signing::Key,
     transports::Http,
     types::{
         Address, Bytes, CallRequest, SignedTransaction, TransactionParameters, TransactionRequest,
+        U256,
     },
     Error, Web3,
 };
@@ -24,6 +26,18 @@ impl EthClient {
         let transport = web3::transports::Http::new(url)?;
         let web3 = web3::Web3::new(transport);
         Ok(Self { web3 })
+    }
+
+    async fn get_gas_limit(&self) -> Result<U256> {
+        let gas_limit = self
+            .web3
+            .eth()
+            .block(BlockId::Number(BlockNumber::Latest))
+            .await?
+            .ok_or(anyhow!("get_gas_limit get block failed"))?
+            .gas_limit
+            / 2;
+        Ok(gas_limit)
     }
 }
 
@@ -100,7 +114,8 @@ impl AutoTx for EthAutoTx {
         let chain_info = chains.get_chain_info(&self.auto_tx_info.chain_name).await?;
         if let ChainType::Eth(client) = chain_info.chain_type {
             if self_update {
-                let new_gas = self.tx.gas.unwrap() / 2 * 3;
+                let gas_limit = client.get_gas_limit().await?;
+                let new_gas = gas_limit.min(self.tx.gas.unwrap() / 2 * 3);
                 self.tx.gas = Some(new_gas)
             } else {
                 let call_req = CallRequest {
@@ -120,26 +135,21 @@ impl AutoTx for EthAutoTx {
     }
 
     async fn update_if_timeout(&mut self, state: &AutoTxGlobalState) -> Result<bool> {
-        warn!("update_if_timeout");
         let chain_info = state
             .chains
             .get_chain_info(&self.auto_tx_info.chain_name)
             .await?;
         if let ChainType::Eth(client) = chain_info.chain_type {
             let current_nonce = self.tx.nonce;
-            warn!("current_nonce: {current_nonce:?}");
             let from = self.auto_tx_info.account.address();
             let target_nonce = client.web3.eth().transaction_count(from, None).await?;
-            warn!("target_nonce: {target_nonce}");
 
             // update if timeout
             if current_nonce.is_none() || current_nonce.unwrap() < target_nonce {
                 // update nonce
                 self.tx.nonce = Some(target_nonce);
-                warn!("true new_nonce: {:?}", self.tx.nonce);
                 Ok(true)
             } else {
-                warn!("false");
                 Ok(false)
             }
         } else {
