@@ -17,7 +17,14 @@ pub async fn get_onchain_hash(
         .ok_or(anyhow::anyhow!("no key in header"))?
         .to_str()?;
 
-    let mut result = state.storage.get_done(req_key).await?;
+    // check params
+    if params.user_code.is_empty() {
+        return Err(anyhow::anyhow!("user_code missing").into());
+    }
+
+    let req_key = params.user_code.clone() + req_key;
+
+    let mut result = state.storage.get_done(&req_key).await?;
     let is_success = if result.len() == 64 {
         result = add_0x(result);
         true

@@ -218,6 +218,8 @@ pub async fn handle_send_tx(
         return Err(anyhow::anyhow!("field \"data\" missing").into());
     }
 
+    let req_key = params.user_code.clone() + req_key;
+
     // get timeout
     let timeout = {
         if let Some(timeout) = params.timeout {
@@ -241,20 +243,20 @@ pub async fn handle_send_tx(
     let value = parse_value(&params.value)?;
     let tx_info = TxInfo::new(from, to, data, value_u256, value);
 
-    let auto_tx_info = AutoTxInfo::new(req_key.to_string(), chain_name, account, tx_info.clone());
+    let auto_tx_info = AutoTxInfo::new(req_key.clone(), chain_name, account, tx_info.clone());
 
     let hash = match chain_info.chain_type {
         ChainType::CitaCloud(_) => {
             let mut cita_cloud_auto_tx = CitaCloudAutoTx::new(auto_tx_info, timeout);
-            cita_cloud_auto_tx.init_unsend(state.clone()).await.unwrap()
+            cita_cloud_auto_tx.init_unsend(state.clone()).await?
         }
         ChainType::Cita(_) => {
             let mut cita_auto_tx = CitaAutoTx::new(auto_tx_info, timeout);
-            cita_auto_tx.init_unsend(state.clone()).await.unwrap()
+            cita_auto_tx.init_unsend(state.clone()).await?
         }
         ChainType::Eth(_) => {
             let mut eth_auto_tx = EthAutoTx::new(auto_tx_info);
-            eth_auto_tx.init_unsend(state.clone()).await.unwrap()
+            eth_auto_tx.init_unsend(state.clone()).await?
         }
     };
 
