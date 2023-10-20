@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use cloud_util::{common::read_toml, tracer::LogConfig};
+use cloud_util::tracer::LogConfig;
+use common_rs::consul::ConsulConfig;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -22,7 +23,7 @@ pub struct Config {
     pub kms_url: String,
     pub config_center_url: String,
     pub log_config: LogConfig,
-
+    pub consul_config: Option<ConsulConfig>,
     pub max_timeout: u32,
     pub process_interval: u64,
     pub datadir: String,
@@ -38,12 +39,7 @@ impl Default for Config {
             max_timeout: 600,
             process_interval: 2,
             datadir: "./data".to_string(),
+            consul_config: Default::default(),
         }
-    }
-}
-
-impl Config {
-    pub fn new(config_str: &str) -> Self {
-        read_toml(config_str, "auto_tx")
     }
 }

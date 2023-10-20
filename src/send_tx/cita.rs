@@ -37,7 +37,7 @@ impl CitaClient {
                 .get("blockInterval")
                 .map(|p| p.to_string())
                 .unwrap_or_default();
-            let block_interval = u64::from_str_radix(&block_interval_str, 10)? / 1000;
+            let block_interval = block_interval_str.parse::<u64>()? / 1000;
             Ok(block_interval)
         } else {
             Err(anyhow!("get_block_interval parse failed"))
