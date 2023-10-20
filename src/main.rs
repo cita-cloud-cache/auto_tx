@@ -36,8 +36,15 @@ use anyhow::Result;
 use axum::{http::StatusCode, middleware, routing::any, Json, Router};
 use chains::Chains;
 use clap::Parser;
-use common_rs::restful::handle_http_error;
+use common_rs::{
+    consul,
+    restful::{handle_http_error, ok_no_data},
+};
 use config::Config;
+use figment::{
+    providers::{Format, Toml},
+    Figment,
+};
 use send_tx::handle_send_tx;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -108,7 +115,9 @@ impl AutoTxGlobalState {
 async fn run(opts: RunOpts) -> Result<()> {
     ::std::env::set_var("RUST_BACKTRACE", "full");
 
-    let config = Config::new(&opts.config_path);
+    let config: Config = Figment::new()
+        .join(Toml::file(&opts.config_path))
+        .extract()?;
     set_kms(config.kms_url.clone());
 
     // init tracer
@@ -119,6 +128,10 @@ async fn run(opts: RunOpts) -> Result<()> {
     let addr = SocketAddr::from(([0, 0, 0, 0], config.port));
 
     let process_interval = config.process_interval;
+
+    if let Some(consul_config) = &config.consul_config {
+        consul::service_register(None, consul_config).await?;
+    }
 
     // async fn log_req<B>(req: axum::http::Request<B>, next: middleware::Next<B>) -> impl IntoResponse
     // where
@@ -133,6 +146,7 @@ async fn run(opts: RunOpts) -> Result<()> {
     let app = Router::new()
         .route("/api/:chain_name/send_tx", any(handle_send_tx))
         .route("/api/get_onchain_hash", any(get_onchain_hash))
+        .route("/health", any(|| async { ok_no_data() }))
         // .route_layer(middleware::from_fn(log_req))
         .route_layer(middleware::from_fn(handle_http_error))
         .fallback(|| async {
