@@ -130,7 +130,7 @@ async fn run(opts: RunOpts) -> Result<()> {
     let process_interval = config.process_interval;
 
     if let Some(consul_config) = &config.consul_config {
-        consul::service_register(None, consul_config).await?;
+        consul::service_register(consul_config).await?;
     }
 
     // async fn log_req<B>(req: axum::http::Request<B>, next: middleware::Next<B>) -> impl IntoResponse

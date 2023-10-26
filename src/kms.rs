@@ -143,7 +143,7 @@ impl Key for Account {
         _message: &[u8],
         _chain_id: Option<u64>,
     ) -> std::result::Result<Signature, SigningError> {
-        unreachable!()
+        unreachable!("only support EIP1559TX")
     }
 
     async fn sign_message(&self, message: &[u8]) -> std::result::Result<Signature, SigningError> {
