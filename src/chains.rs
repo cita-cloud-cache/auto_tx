@@ -115,9 +115,9 @@ impl Chains {
             "eth".to_string(),
             ChainInfo::new(
                 "eth",
-                ChainType::Eth(EthClient::new("http://192.168.120.6:8545").unwrap()),
+                ChainType::Eth(EthClient::new("http://192.168.120.0:8545").unwrap()),
                 "Secp256k1",
-                "http://192.168.120.6:8545",
+                "http://192.168.120.0:8545",
             ),
         );
         Self {

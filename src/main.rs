@@ -48,8 +48,9 @@ use figment::{
 use send_tx::handle_send_tx;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::{net::SocketAddr, sync::Arc};
+use std::{collections::HashSet, net::SocketAddr, sync::Arc};
 use storage::Storage;
+use tokio::sync::RwLock;
 
 /// A subcommand for run
 #[derive(Parser)]
@@ -99,6 +100,7 @@ pub struct AutoTxGlobalState {
     pub chains: Chains,
     pub storage: Storage,
     pub max_timeout: u32,
+    pub processing: Arc<RwLock<HashSet<String>>>,
 }
 
 impl AutoTxGlobalState {
@@ -107,6 +109,7 @@ impl AutoTxGlobalState {
             chains: Chains::new(config.config_center_url),
             storage: Storage::new(config.datadir),
             max_timeout: config.max_timeout,
+            processing: Arc::new(RwLock::new(HashSet::new())),
         }
     }
 }
@@ -160,26 +163,22 @@ async fn run(opts: RunOpts) -> Result<()> {
         })
         .with_state(state.clone());
 
-    let state_clone = state.clone();
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(tokio::time::Duration::from_secs(process_interval)).await;
-            match state_clone.storage.get_all_processing().await {
+            match state.storage.get_all_processing().await {
                 Ok(auto_txs) => {
                     for mut auto_tx in auto_txs {
-                        let state = state_clone.clone();
-                        let tag = auto_tx.get_tag();
-                        match tag {
-                            send_tx::AutoTxTag::Unsend => {
-                                tokio::spawn(async move {
-                                    let _ = auto_tx.send(state).await;
-                                });
-                            }
-                            send_tx::AutoTxTag::Uncheck => {
-                                tokio::spawn(async move {
-                                    let _ = auto_tx.check(state).await;
-                                });
-                            }
+                        let state = state.clone();
+                        let req_key = auto_tx.get_key();
+                        let is_processing = {
+                            let read = state.processing.read().await;
+                            read.contains(&req_key)
+                        };
+                        if !is_processing {
+                            tokio::spawn(async move {
+                                let _ = auto_tx.process(state).await;
+                            });
                         }
                     }
                 }

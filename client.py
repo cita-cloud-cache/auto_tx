@@ -2,7 +2,7 @@ import requests
 import time
 
 # send tx
-url = "http://127.0.0.1:4000/api/cita-cloud/send_tx"
+url = "http://127.0.0.1:4000/api/eth/send_tx"
 
 headers = {"Content-Type": "application/json", "key": "auto_tx_test"}
 

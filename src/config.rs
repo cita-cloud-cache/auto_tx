@@ -37,7 +37,7 @@ impl Default for Config {
             config_center_url: Default::default(),
             log_config: Default::default(),
             max_timeout: 600,
-            process_interval: 2,
+            process_interval: 5,
             datadir: "./data".to_string(),
             consul_config: Default::default(),
         }

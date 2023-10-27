@@ -171,7 +171,15 @@ pub enum AutoTxType {
 }
 
 impl AutoTxType {
-    pub fn get_tag(&self) -> &AutoTxTag {
+    pub fn get_key(&self) -> String {
+        match self {
+            AutoTxType::CitaCloud(auto_tx) => auto_tx.get_key(),
+            AutoTxType::Cita(auto_tx) => auto_tx.get_key(),
+            AutoTxType::Eth(auto_tx) => auto_tx.get_key(),
+        }
+    }
+
+    fn get_tag(&self) -> &AutoTxTag {
         match self {
             AutoTxType::CitaCloud(auto_tx) => auto_tx.get_tag(),
             AutoTxType::Cita(auto_tx) => auto_tx.get_tag(),
@@ -179,7 +187,7 @@ impl AutoTxType {
         }
     }
 
-    pub async fn send(&mut self, state: Arc<AutoTxGlobalState>) -> Result<()> {
+    async fn send(&mut self, state: Arc<AutoTxGlobalState>) -> Result<()> {
         match self {
             AutoTxType::CitaCloud(auto_tx) => auto_tx.send(state).await,
             AutoTxType::Cita(auto_tx) => auto_tx.send(state).await,
@@ -187,12 +195,26 @@ impl AutoTxType {
         }
     }
 
-    pub async fn check(&mut self, state: Arc<AutoTxGlobalState>) -> Result<()> {
+    async fn check(&mut self, state: Arc<AutoTxGlobalState>) -> Result<()> {
         match self {
             AutoTxType::CitaCloud(auto_tx) => auto_tx.check(state).await,
             AutoTxType::Cita(auto_tx) => auto_tx.check(state).await,
             AutoTxType::Eth(auto_tx) => auto_tx.check(state).await,
         }
+    }
+
+    pub async fn process(&mut self, state: Arc<AutoTxGlobalState>) -> Result<()> {
+        let req_key = self.get_key();
+        let processing = state.processing.clone();
+        let mut write = processing.write().await;
+        write.insert(req_key.clone());
+        let tag = self.get_tag();
+        let result = match tag {
+            AutoTxTag::Unsend => self.send(state).await,
+            AutoTxTag::Uncheck => self.check(state).await,
+        };
+        write.remove(&req_key);
+        result
     }
 }
 
@@ -223,7 +245,7 @@ pub async fn handle_send_tx(
     // get timeout
     let timeout = {
         if let Some(timeout) = params.timeout {
-            timeout.min(state.max_timeout)
+            (timeout.min(state.max_timeout).max(20) as f64 * 0.8) as u32
         } else {
             state.max_timeout
         }
@@ -245,20 +267,31 @@ pub async fn handle_send_tx(
 
     let auto_tx_info = AutoTxInfo::new(req_key.clone(), chain_name, account, tx_info.clone());
 
-    let hash = match chain_info.chain_type {
+    let (hash, mut auto_tx) = match chain_info.chain_type {
         ChainType::CitaCloud(_) => {
             let mut cita_cloud_auto_tx = CitaCloudAutoTx::new(auto_tx_info, timeout);
-            cita_cloud_auto_tx.init_unsend(state.clone()).await?
+            let hash = cita_cloud_auto_tx.init_unsend(state.clone()).await?;
+            let auto_tx = cita_cloud_auto_tx.to_unified_type();
+            (hash, auto_tx)
         }
         ChainType::Cita(_) => {
             let mut cita_auto_tx = CitaAutoTx::new(auto_tx_info, timeout);
-            cita_auto_tx.init_unsend(state.clone()).await?
+            let hash = cita_auto_tx.init_unsend(state.clone()).await?;
+            let auto_tx = cita_auto_tx.to_unified_type();
+            (hash, auto_tx)
         }
         ChainType::Eth(_) => {
             let mut eth_auto_tx = EthAutoTx::new(auto_tx_info);
-            eth_auto_tx.init_unsend(state.clone()).await?
+            let hash = eth_auto_tx.init_unsend(state.clone()).await?;
+            let auto_tx = eth_auto_tx.to_unified_type();
+            (hash, auto_tx)
         }
     };
+
+    // process at once
+    tokio::spawn(async move {
+        let _ = auto_tx.process(state).await;
+    });
 
     info!(
         "receive send_tx request: req_key: {}, user_code: {}\n\tChainInfo: {}\n\tTxInfo: {}\n\tinitial hash: 0x{}",
