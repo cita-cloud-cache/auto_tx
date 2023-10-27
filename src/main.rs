@@ -38,7 +38,7 @@ use chains::Chains;
 use clap::Parser;
 use common_rs::{
     consul,
-    restful::{handle_http_error, ok_no_data},
+    restful::{handle_http_error, ok_no_data, shutdown_signal},
 };
 use config::Config;
 use figment::{
@@ -190,9 +190,9 @@ async fn run(opts: RunOpts) -> Result<()> {
     info!("auto_tx listening on {}", addr);
     axum::Server::bind(&addr)
         .serve(app.into_make_service())
+        .with_graceful_shutdown(shutdown_signal())
         .await
-        .map_err(|e| anyhow::anyhow!("axum serve failed: {e}"))?;
-    anyhow::bail!("unreachable!")
+        .map_err(|e| anyhow::anyhow!("axum serve failed: {e}"))
 }
 
 #[derive(Debug, Clone, Serialize, Default, Deserialize)]
