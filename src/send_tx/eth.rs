@@ -1,4 +1,4 @@
-use super::{AutoTx, AutoTxInfo, AutoTxTag, AutoTxType};
+use super::{AutoTx, AutoTxInfo, AutoTxTag, AutoTxType, TxData};
 use crate::chains::{ChainType, Chains};
 use crate::AutoTxGlobalState;
 use anyhow::{anyhow, Result};
@@ -65,17 +65,16 @@ pub struct EthAutoTx {
 }
 
 impl EthAutoTx {
-    pub fn new(auto_tx_info: AutoTxInfo) -> Self {
-        let to = if auto_tx_info.is_create() {
+    pub fn new(auto_tx_info: AutoTxInfo, tx_data: TxData) -> Self {
+        let to = if tx_data.to.is_empty() {
             None
         } else {
-            Some(Address::from_slice(&auto_tx_info.tx_info.to))
+            Some(Address::from_slice(&tx_data.to))
         };
         let tx = TransactionRequest {
-            from: Address::from_slice(&auto_tx_info.tx_info.from),
             to,
-            value: Some(auto_tx_info.tx_info.value.1),
-            data: Some(Bytes(auto_tx_info.tx_info.data.clone())),
+            value: Some(tx_data.value.1),
+            data: Some(Bytes(tx_data.data.clone())),
             transaction_type: Some(U64::from(2)),
             ..Default::default()
         };
@@ -119,7 +118,7 @@ impl AutoTx for EthAutoTx {
                 self.tx.gas = Some(new_gas)
             } else {
                 let call_req = CallRequest {
-                    from: Some(self.tx.from),
+                    from: Some(self.auto_tx_info.account.address()),
                     to: self.tx.to,
                     value: self.tx.value,
                     data: self.tx.data.clone(),
@@ -134,7 +133,7 @@ impl AutoTx for EthAutoTx {
         Ok(())
     }
 
-    async fn update_if_timeout(&mut self, state: &AutoTxGlobalState) -> Result<bool> {
+    async fn update_tx_if_timeout(&mut self, state: &AutoTxGlobalState) -> Result<bool> {
         let chain_info = state
             .chains
             .get_chain_info(&self.auto_tx_info.chain_name)
@@ -221,7 +220,7 @@ impl AutoTx for EthAutoTx {
                             }
                         }
                         info!("unsend task: {} send failed: {}", self.get_key(), e);
-                        if self.update_if_timeout(&state).await? {
+                        if self.update_tx_if_timeout(&state).await? {
                             self.update_current_hash(&state.chains).await?;
                             self.store_unsend(&state.storage).await?;
                         }
@@ -272,7 +271,7 @@ impl AutoTx for EthAutoTx {
                                         hash
                                     );
                                     self.update_gas(&state.chains, true).await?;
-                                    // self.update_if_timeout(&state).await?;
+                                    // self.update_tx_if_timeout(&state).await?;
                                     self.update_current_hash(&state.chains).await?;
                                     self.store_unsend(&state.storage).await?;
                                 }
@@ -295,7 +294,7 @@ impl AutoTx for EthAutoTx {
                         None => {
                             // check if timeout
                             info!("uncheck task: {} check failed: not found", self.get_key());
-                            if self.update_if_timeout(&state).await? {
+                            if self.update_tx_if_timeout(&state).await? {
                                 self.update_current_hash(&state.chains).await?;
                                 self.store_unsend(&state.storage).await?;
                             }
@@ -308,7 +307,7 @@ impl AutoTx for EthAutoTx {
                             self.get_key(),
                             e
                         );
-                        if self.update_if_timeout(&state).await? {
+                        if self.update_tx_if_timeout(&state).await? {
                             self.update_current_hash(&state.chains).await?;
                             self.store_unsend(&state.storage).await?;
                         }

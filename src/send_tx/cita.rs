@@ -1,4 +1,4 @@
-use super::{AutoTx, AutoTxInfo, AutoTxTag, AutoTxType};
+use super::{AutoTx, AutoTxInfo, AutoTxTag, AutoTxType, TxData};
 use crate::chains::{ChainType, Chains};
 use crate::kms::Kms;
 use crate::util::{add_0x, remove_0x};
@@ -113,11 +113,15 @@ pub struct CitaAutoTx {
 }
 
 impl CitaAutoTx {
-    pub fn new(auto_tx_info: AutoTxInfo, remain_time: u32) -> Self {
+    pub fn new(auto_tx_info: AutoTxInfo, tx_data: TxData, remain_time: u32) -> Self {
+        let to_v1 = tx_data.to.clone();
+        let to = hex::encode(&to_v1);
         let tx = CitaTransactionForSerde {
-            data: auto_tx_info.tx_info.data.clone(),
-            value: auto_tx_info.tx_info.value.0.clone(),
+            data: tx_data.data,
+            value: tx_data.value.0,
             nonce: auto_tx_info.req_key.clone(),
+            to,
+            to_v1,
             ..Default::default()
         };
         Self {
@@ -131,6 +135,10 @@ impl CitaAutoTx {
 
     pub const fn get_remain_time(&self) -> u32 {
         self.remain_time
+    }
+
+    pub fn is_create(&self) -> bool {
+        self.tx.to_v1.is_empty()
     }
 }
 
@@ -163,14 +171,14 @@ impl AutoTx for CitaAutoTx {
                 let quota_limit = cita_client.get_gas_limit()?;
                 let new_quota = quota_limit.min(self.tx.quota * 2);
                 self.tx.quota = new_quota
-            } else if self.auto_tx_info.is_create() {
+            } else if self.is_create() {
                 self.tx.quota = 3_000_000;
             } else {
-                let from_str = add_0x(hex::encode(self.auto_tx_info.tx_info.from.clone()));
+                let from_str = add_0x(hex::encode(self.auto_tx_info.account.address()));
                 let from = Some(from_str.as_str());
-                let to_str = add_0x(hex::encode(self.auto_tx_info.tx_info.to.clone()));
+                let to_str = add_0x(self.tx.to.clone());
                 let to = to_str.as_str();
-                let data_str = add_0x(hex::encode(self.auto_tx_info.tx_info.data.clone()));
+                let data_str = add_0x(hex::encode(self.tx.data.clone()));
                 let data = Some(data_str.as_str());
 
                 let resp = cita_client
@@ -194,7 +202,7 @@ impl AutoTx for CitaAutoTx {
         Ok(())
     }
 
-    async fn update_if_timeout(&mut self, state: &AutoTxGlobalState) -> Result<bool> {
+    async fn update_tx_if_timeout(&mut self, state: &AutoTxGlobalState) -> Result<bool> {
         let chain_info = state
             .chains
             .get_chain_info(&self.auto_tx_info.chain_name)
@@ -235,14 +243,15 @@ impl AutoTx for CitaAutoTx {
 
                     let version = cita_client.client.get_version().unwrap();
                     if version == 0 {
-                        let to = hex::encode(&self.auto_tx_info.tx_info.to);
-                        self.tx.to = to;
+                        // new to must be empty
+                        self.tx.to_v1 = Vec::new();
                         self.tx.chain_id = cita_client
                             .client
                             .get_chain_id()
                             .map_err(|_| anyhow!("update_args get_chain_id failed"))?;
                     } else if version < 3 {
-                        self.tx.to_v1 = self.auto_tx_info.tx_info.to.clone();
+                        // old to must be empty
+                        self.tx.to = String::new();
                         self.tx.chain_id_v1 = hex::decode(
                             cita_client
                                 .client
@@ -330,7 +339,7 @@ impl AutoTx for CitaAutoTx {
                                     error_info,
                                     self.get_remain_time()
                                 );
-                                if self.update_if_timeout(&state).await? {
+                                if self.update_tx_if_timeout(&state).await? {
                                     self.update_current_hash(&state.chains).await?;
                                     self.store_unsend(&state.storage).await?;
                                 }
@@ -344,7 +353,7 @@ impl AutoTx for CitaAutoTx {
                             e,
                             self.get_remain_time()
                         );
-                        if self.update_if_timeout(&state).await? {
+                        if self.update_tx_if_timeout(&state).await? {
                             self.update_current_hash(&state.chains).await?;
                             self.store_unsend(&state.storage).await?;
                         }
@@ -412,7 +421,7 @@ impl AutoTx for CitaAutoTx {
                                     );
                                     self.store_done(
                                         &state.storage,
-                                        Some("execute failed".to_string()),
+                                        Some("execute failed:".to_string() + s),
                                     )
                                     .await?;
                                 }
@@ -433,7 +442,7 @@ impl AutoTx for CitaAutoTx {
                             error_info,
                             self.get_remain_time()
                         );
-                        if self.update_if_timeout(&state).await? {
+                        if self.update_tx_if_timeout(&state).await? {
                             self.update_current_hash(&state.chains).await?;
                             self.store_unsend(&state.storage).await?;
                         }

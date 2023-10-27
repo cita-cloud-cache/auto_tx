@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use cita_tool::{Encryption, Hashable};
 use ethabi::ethereum_types::H256;
 use once_cell::sync::OnceCell;
@@ -41,9 +41,11 @@ async fn get_user_address(user_code: &str, crypto_type: &str) -> Result<Vec<u8>>
         .post(kms_url)
         .json(&data)
         .send()
-        .await?
+        .await
+        .map_err(|_| anyhow!("get_user_address failed: send request failed"))?
         .json::<AddrResponse>()
-        .await?;
+        .await
+        .map_err(|_| anyhow!("get_user_address failed: kms unavailable"))?;
 
     if resp.code != 200 {
         return Err(anyhow::anyhow!(resp.message));
@@ -79,10 +81,10 @@ async fn sign_message(user_code: &str, crypto_type: &str, message: &str) -> Resu
         .json(&data)
         .send()
         .await
-        .unwrap()
+        .map_err(|_| anyhow!("sign_message failed: send request failed"))?
         .json::<SignResponse>()
         .await
-        .unwrap();
+        .map_err(|_| anyhow!("sign_message failed: kms unavailable"))?;
     let sig = resp.data.signature;
 
     if resp.code != 200 {

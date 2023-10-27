@@ -1,4 +1,4 @@
-use super::{AutoTx, AutoTxInfo, AutoTxTag, AutoTxType};
+use super::{AutoTx, AutoTxInfo, AutoTxTag, AutoTxType, TxData};
 use crate::chains::{ChainType, Chains};
 use crate::kms::Kms;
 use crate::AutoTxGlobalState;
@@ -84,11 +84,15 @@ pub struct CitaCloudAutoTx {
 }
 
 impl CitaCloudAutoTx {
-    pub fn new(auto_tx_info: AutoTxInfo, remain_time: u32) -> Self {
+    pub fn new(auto_tx_info: AutoTxInfo, tx_data: TxData, remain_time: u32) -> Self {
+        let to = match tx_data.to.is_empty() {
+            true => vec![0u8; 20],
+            false => tx_data.to,
+        };
         let tx = CitaCloudlTransactionForSerde {
-            to: auto_tx_info.tx_info.to.clone(),
-            data: auto_tx_info.tx_info.data.clone(),
-            value: auto_tx_info.tx_info.value.0.clone(),
+            to,
+            data: tx_data.data,
+            value: tx_data.value.0,
             nonce: auto_tx_info.req_key.clone(),
             ..Default::default()
         };
@@ -136,14 +140,9 @@ impl AutoTx for CitaCloudAutoTx {
                 let new_quota = quota_limit.min(self.tx.quota / 2 * 3);
                 self.tx.quota = new_quota
             } else {
-                let to = if self.auto_tx_info.is_create() {
-                    vec![0u8; 20]
-                } else {
-                    self.auto_tx_info.tx_info.to.clone()
-                };
                 let call = CallRequest {
                     from: self.auto_tx_info.account.address(),
-                    to,
+                    to: self.tx.to.clone(),
                     method: self.tx.data.clone(),
                     args: Vec::new(),
                     height: 0,
@@ -163,7 +162,7 @@ impl AutoTx for CitaCloudAutoTx {
         Ok(())
     }
 
-    async fn update_if_timeout(&mut self, state: &AutoTxGlobalState) -> Result<bool> {
+    async fn update_tx_if_timeout(&mut self, state: &AutoTxGlobalState) -> Result<bool> {
         let chain_info = state
             .chains
             .get_chain_info(&self.auto_tx_info.chain_name)
@@ -255,7 +254,7 @@ impl AutoTx for CitaCloudAutoTx {
                 // organize RawTransaction
                 let raw_tx = {
                     let witness = Witness {
-                        sender: self.auto_tx_info.tx_info.from.clone(),
+                        sender: self.auto_tx_info.account.address(),
                         signature: sig,
                     };
 
@@ -307,7 +306,7 @@ impl AutoTx for CitaCloudAutoTx {
                             e.message(),
                             self.get_remain_time()
                         );
-                        if self.update_if_timeout(&state).await? {
+                        if self.update_tx_if_timeout(&state).await? {
                             self.update_current_hash(&state.chains).await?;
                             self.store_unsend(&state.storage).await?;
                         }
@@ -384,7 +383,7 @@ impl AutoTx for CitaCloudAutoTx {
                             e.message(),
                             self.get_remain_time()
                         );
-                        if self.update_if_timeout(&state).await? {
+                        if self.update_tx_if_timeout(&state).await? {
                             self.update_current_hash(&state.chains).await?;
                             self.store_unsend(&state.storage).await?;
                         }

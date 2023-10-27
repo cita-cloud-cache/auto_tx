@@ -4,7 +4,7 @@ pub mod eth;
 
 use crate::{
     chains::*,
-    kms::{Account, Kms},
+    kms::Account,
     send_tx::{cita::CitaAutoTx, cita_cloud::CitaCloudAutoTx, eth::EthAutoTx},
     storage::{AutoTxStorage, Storage},
     util::{add_0x, display_value, parse_data, parse_value},
@@ -64,18 +64,18 @@ pub trait AutoTx: Clone {
 
     async fn update_gas(&mut self, chains: &Chains, self_update: bool) -> Result<()>;
 
-    async fn update_if_timeout(&mut self, state: &AutoTxGlobalState) -> Result<bool>;
+    async fn update_tx_if_timeout(&mut self, state: &AutoTxGlobalState) -> Result<bool>;
 
     async fn update_current_hash(&mut self, chains: &Chains) -> Result<String>;
 
     async fn init_unsend(&mut self, state: Arc<AutoTxGlobalState>) -> Result<String> {
         self.update_gas(&state.chains, false).await?;
-        if self.update_if_timeout(&state).await? {
+        if self.update_tx_if_timeout(&state).await? {
             let hash = self.update_current_hash(&state.chains).await?;
             self.store_unsend(&state.storage).await?;
             Ok(hash)
         } else {
-            Err(anyhow!("init failed: update_if_timeout is false"))
+            Err(anyhow!("init failed: update_tx_if_timeout is false"))
         }
     }
 
@@ -85,14 +85,13 @@ pub trait AutoTx: Clone {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TxInfo {
-    from: Vec<u8>,
+pub struct TxData {
     to: Vec<u8>,
     data: Vec<u8>,
     value: (Vec<u8>, U256),
 }
 
-impl Display for TxInfo {
+impl Display for TxData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let data_len = self.data.len();
         let data = if data_len > 10 {
@@ -108,8 +107,7 @@ impl Display for TxInfo {
 
         write!(
             f,
-            "from: {}, to: {}, data: {}, value: {}",
-            add_0x(hex::encode(self.from.clone())),
+            "to: {}, data: {}, value: {}",
             add_0x(hex::encode(self.to.clone())),
             data,
             display_value,
@@ -117,10 +115,9 @@ impl Display for TxInfo {
     }
 }
 
-impl TxInfo {
-    fn new(from: Vec<u8>, to: Vec<u8>, data: Vec<u8>, value_u256: U256, value: Vec<u8>) -> Self {
+impl TxData {
+    fn new(to: Vec<u8>, data: Vec<u8>, value_u256: U256, value: Vec<u8>) -> Self {
         Self {
-            from,
             to,
             data,
             value: (value, value_u256),
@@ -133,26 +130,15 @@ pub struct AutoTxInfo {
     req_key: String,
     chain_name: String,
     account: Account,
-    tx_info: TxInfo,
 }
 
 impl AutoTxInfo {
-    pub const fn new(
-        req_key: String,
-        chain_name: String,
-        account: Account,
-        tx_info: TxInfo,
-    ) -> Self {
+    pub const fn new(req_key: String, chain_name: String, account: Account) -> Self {
         Self {
             req_key,
             chain_name,
             account,
-            tx_info,
         }
-    }
-
-    pub fn is_create(&self) -> bool {
-        self.tx_info.to.is_empty()
     }
 }
 
@@ -224,13 +210,30 @@ pub async fn handle_send_tx(
     State(state): State<Arc<AutoTxGlobalState>>,
     Json(params): Json<RequestParams>,
 ) -> std::result::Result<impl IntoResponse, RESTfulError> {
-    debug!("params: {:?}", params);
-
-    // get req_key
     let req_key = headers
         .get("key")
-        .ok_or(anyhow::anyhow!("no req_key in header"))?
+        .ok_or_else(|| {
+            let e = anyhow::anyhow!("no req_key in header");
+            warn!("request failed: {}", e);
+            e
+        })?
         .to_str()?;
+
+    handle(req_key, Path(chain_name), State(state), Json(params))
+        .await
+        .map_err(|e| {
+            warn!("request: {} failed: {:?}", req_key, e);
+            e
+        })
+}
+
+pub async fn handle(
+    req_key: &str,
+    Path(chain_name): Path<String>,
+    State(state): State<Arc<AutoTxGlobalState>>,
+    Json(params): Json<RequestParams>,
+) -> std::result::Result<impl IntoResponse, RESTfulError> {
+    debug!("params: {:?}", params);
 
     // check params
     if params.user_code.is_empty() {
@@ -258,30 +261,30 @@ pub async fn handle_send_tx(
     let account = Account::new(params.user_code.clone(), chain_info.crypto_type.clone()).await?;
 
     // convert tx field
-    let from = account.address();
     let to = parse_data(&params.to)?;
     let data = parse_data(&params.data)?;
     let value_u256 = U256::from_dec_str(&params.value)?;
     let value = parse_value(&params.value)?;
-    let tx_info = TxInfo::new(from, to, data, value_u256, value);
+    let tx_data = TxData::new(to, data, value_u256, value);
 
-    let auto_tx_info = AutoTxInfo::new(req_key.clone(), chain_name, account, tx_info.clone());
+    let auto_tx_info = AutoTxInfo::new(req_key.clone(), chain_name, account);
 
     let (hash, mut auto_tx) = match chain_info.chain_type {
         ChainType::CitaCloud(_) => {
-            let mut cita_cloud_auto_tx = CitaCloudAutoTx::new(auto_tx_info, timeout);
+            let mut cita_cloud_auto_tx =
+                CitaCloudAutoTx::new(auto_tx_info, tx_data.clone(), timeout);
             let hash = cita_cloud_auto_tx.init_unsend(state.clone()).await?;
             let auto_tx = cita_cloud_auto_tx.to_unified_type();
             (hash, auto_tx)
         }
         ChainType::Cita(_) => {
-            let mut cita_auto_tx = CitaAutoTx::new(auto_tx_info, timeout);
+            let mut cita_auto_tx = CitaAutoTx::new(auto_tx_info, tx_data.clone(), timeout);
             let hash = cita_auto_tx.init_unsend(state.clone()).await?;
             let auto_tx = cita_auto_tx.to_unified_type();
             (hash, auto_tx)
         }
         ChainType::Eth(_) => {
-            let mut eth_auto_tx = EthAutoTx::new(auto_tx_info);
+            let mut eth_auto_tx = EthAutoTx::new(auto_tx_info, tx_data.clone());
             let hash = eth_auto_tx.init_unsend(state.clone()).await?;
             let auto_tx = eth_auto_tx.to_unified_type();
             (hash, auto_tx)
@@ -295,7 +298,7 @@ pub async fn handle_send_tx(
 
     info!(
         "receive send_tx request: req_key: {}, user_code: {}\n\tChainInfo: {}\n\tTxInfo: {}\n\tinitial hash: 0x{}",
-        req_key, params.user_code, chain_info, tx_info, hash.clone()
+        req_key, params.user_code, chain_info, tx_data, hash.clone()
     );
 
     ok(json!({
