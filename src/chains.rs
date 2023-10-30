@@ -111,8 +111,7 @@ impl ConfigCenter {
     }
 
     async fn request_chain_info(&self, chain_name: &str) -> Result<Chain> {
-        let str =
-            consul::read_raw_key(&self.url, &(self.consul_dir.clone() + chain_name)).await?;
+        let str = consul::read_raw_key(&self.url, &(self.consul_dir.clone() + chain_name)).await?;
         let chain_info: ChainInfo = serde_json::from_str(str.as_str())?;
         Chain::new(chain_name, chain_info)
     }

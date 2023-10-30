@@ -1,8 +1,12 @@
 import requests
 import time
 
+target = "http://124.71.204.213/auto_api/"
+
+chain_name = "cita-cloud-test"
+
 # send tx
-url = "http://127.0.0.1:4000/api/eth-test/send_tx"
+url = target + "api/" + chain_name + "/send_tx"
 
 headers = {"Content-Type": "application/json", "key": "auto_tx_test"}
 
@@ -26,7 +30,7 @@ print(f"send success, hash: {hash}")
 time.sleep(10)
 
 # get onchain hash
-url = "http://127.0.0.1:4000/api/get_onchain_hash"
+url = target + "api/get_onchain_hash"
 
 response = requests.post(url, json={"user_code": "1"}, headers=headers)
 
