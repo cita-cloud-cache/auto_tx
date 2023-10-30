@@ -84,7 +84,7 @@ async fn sign_message(user_code: &str, crypto_type: &str, message: &str) -> Resu
         .map_err(|_| anyhow!("sign_message failed: send request failed"))?
         .json::<SignResponse>()
         .await
-        .map_err(|_| anyhow!("sign_message failed: kms unavailable"))?;
+        .map_err(|_| anyhow!("sign_message failed: kms unavailable or parse json failed"))?;
     let sig = resp.data.signature;
 
     if resp.code != 200 {

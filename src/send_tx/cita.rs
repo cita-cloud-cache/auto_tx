@@ -1,5 +1,5 @@
 use super::{AutoTx, AutoTxInfo, AutoTxTag, AutoTxType, TxData};
-use crate::chains::{ChainType, Chains};
+use crate::chains::{ChainClient, Chains};
 use crate::kms::Kms;
 use crate::util::{add_0x, remove_0x};
 use crate::AutoTxGlobalState;
@@ -165,8 +165,8 @@ impl AutoTx for CitaAutoTx {
     }
 
     async fn update_gas(&mut self, chains: &Chains, self_update: bool) -> Result<()> {
-        let chain_info = chains.get_chain_info(&self.auto_tx_info.chain_name).await?;
-        if let ChainType::Cita(cita_client) = chain_info.chain_type {
+        let chain_info = chains.get_chain(&self.auto_tx_info.chain_name).await?;
+        if let ChainClient::Cita(cita_client) = chain_info.chain_client {
             if self_update {
                 let quota_limit = cita_client.get_gas_limit()?;
                 let new_quota = quota_limit.min(self.tx.quota * 2);
@@ -205,9 +205,9 @@ impl AutoTx for CitaAutoTx {
     async fn update_tx_if_timeout(&mut self, state: &AutoTxGlobalState) -> Result<bool> {
         let chain_info = state
             .chains
-            .get_chain_info(&self.auto_tx_info.chain_name)
+            .get_chain(&self.auto_tx_info.chain_name)
             .await?;
-        if let ChainType::Cita(mut cita_client) = chain_info.chain_type {
+        if let ChainClient::Cita(mut cita_client) = chain_info.chain_client {
             let current_height = cita_client
                 .client
                 .get_current_height()
@@ -301,12 +301,9 @@ impl AutoTx for CitaAutoTx {
     }
 
     async fn send(&mut self, state: Arc<AutoTxGlobalState>) -> Result<()> {
-        let res = state
-            .chains
-            .get_chain_info(&self.auto_tx_info.chain_name)
-            .await;
+        let res = state.chains.get_chain(&self.auto_tx_info.chain_name).await;
         if let Ok(chain_info) = res {
-            if let ChainType::Cita(mut cita_client) = chain_info.chain_type {
+            if let ChainClient::Cita(mut cita_client) = chain_info.chain_client {
                 let signed_tx = add_0x(hex::encode(self.hash.unverified.clone()));
 
                 match cita_client.client.send_signed_transaction(&signed_tx) {
@@ -363,17 +360,14 @@ impl AutoTx for CitaAutoTx {
 
             Ok(())
         } else {
-            Err(anyhow!("send failed: get_chain_info failed"))
+            Err(anyhow!("send failed: get_chain failed"))
         }
     }
 
     async fn check(&mut self, state: Arc<AutoTxGlobalState>) -> Result<()> {
-        let res = state
-            .chains
-            .get_chain_info(&self.auto_tx_info.chain_name)
-            .await;
+        let res = state.chains.get_chain(&self.auto_tx_info.chain_name).await;
         if let Ok(chain_info) = res {
-            if let ChainType::Cita(cita_client) = chain_info.chain_type {
+            if let ChainClient::Cita(cita_client) = chain_info.chain_client {
                 let hash = add_0x(self.get_current_hash());
                 // check receipt
                 let result = cita_client
@@ -452,7 +446,7 @@ impl AutoTx for CitaAutoTx {
 
             Ok(())
         } else {
-            Err(anyhow!("check failed: get_chain_info failed"))
+            Err(anyhow!("check failed: get_chain failed"))
         }
     }
 }

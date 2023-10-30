@@ -1,5 +1,5 @@
 use super::{AutoTx, AutoTxInfo, AutoTxTag, AutoTxType, TxData};
-use crate::chains::{ChainType, Chains};
+use crate::chains::{ChainClient, Chains};
 use crate::AutoTxGlobalState;
 use anyhow::{anyhow, Result};
 use ethabi::ethereum_types::{H256, U64};
@@ -110,8 +110,8 @@ impl AutoTx for EthAutoTx {
     }
 
     async fn update_gas(&mut self, chains: &Chains, self_update: bool) -> Result<()> {
-        let chain_info = chains.get_chain_info(&self.auto_tx_info.chain_name).await?;
-        if let ChainType::Eth(client) = chain_info.chain_type {
+        let chain_info = chains.get_chain(&self.auto_tx_info.chain_name).await?;
+        if let ChainClient::Eth(client) = chain_info.chain_client {
             if self_update {
                 let gas_limit = client.get_gas_limit().await?;
                 let new_gas = gas_limit.min(self.tx.gas.unwrap() / 2 * 3);
@@ -136,9 +136,9 @@ impl AutoTx for EthAutoTx {
     async fn update_tx_if_timeout(&mut self, state: &AutoTxGlobalState) -> Result<bool> {
         let chain_info = state
             .chains
-            .get_chain_info(&self.auto_tx_info.chain_name)
+            .get_chain(&self.auto_tx_info.chain_name)
             .await?;
-        if let ChainType::Eth(client) = chain_info.chain_type {
+        if let ChainClient::Eth(client) = chain_info.chain_client {
             let current_nonce = self.tx.nonce;
             let from = self.auto_tx_info.account.address();
             let target_nonce = client.web3.eth().transaction_count(from, None).await?;
@@ -157,8 +157,8 @@ impl AutoTx for EthAutoTx {
     }
 
     async fn update_current_hash(&mut self, chains: &Chains) -> Result<String> {
-        let chain_info = chains.get_chain_info(&self.auto_tx_info.chain_name).await?;
-        if let ChainType::Eth(client) = chain_info.chain_type {
+        let chain_info = chains.get_chain(&self.auto_tx_info.chain_name).await?;
+        if let ChainClient::Eth(client) = chain_info.chain_client {
             let tx_params = TransactionParameters {
                 nonce: self.tx.nonce,
                 to: self.tx.to,
@@ -182,12 +182,9 @@ impl AutoTx for EthAutoTx {
     }
 
     async fn send(&mut self, state: Arc<AutoTxGlobalState>) -> Result<()> {
-        let res = state
-            .chains
-            .get_chain_info(&self.auto_tx_info.chain_name)
-            .await;
+        let res = state.chains.get_chain(&self.auto_tx_info.chain_name).await;
         if let Ok(chain_info) = res {
-            if let ChainType::Eth(client) = chain_info.chain_type {
+            if let ChainClient::Eth(client) = chain_info.chain_client {
                 match client
                     .web3
                     .eth()
@@ -230,17 +227,14 @@ impl AutoTx for EthAutoTx {
 
             Ok(())
         } else {
-            Err(anyhow!("send failed: get_chain_info failed"))
+            Err(anyhow!("send failed: get_chain failed"))
         }
     }
 
     async fn check(&mut self, state: Arc<AutoTxGlobalState>) -> Result<()> {
-        let res = state
-            .chains
-            .get_chain_info(&self.auto_tx_info.chain_name)
-            .await;
+        let res = state.chains.get_chain(&self.auto_tx_info.chain_name).await;
         if let Ok(chain_info) = res {
-            if let ChainType::Eth(client) = chain_info.chain_type {
+            if let ChainClient::Eth(client) = chain_info.chain_client {
                 match client
                     .web3
                     .eth()
@@ -317,7 +311,7 @@ impl AutoTx for EthAutoTx {
 
             Ok(())
         } else {
-            Err(anyhow!("check failed: get_chain_info failed"))
+            Err(anyhow!("check failed: get_chain failed"))
         }
     }
 }

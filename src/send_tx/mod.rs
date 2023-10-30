@@ -255,10 +255,14 @@ pub async fn handle(
     };
 
     // get ChainInfo
-    let chain_info = state.chains.get_chain_info(&chain_name).await?;
+    let chain = state.chains.get_chain(&chain_name).await?;
 
     // get account
-    let account = Account::new(params.user_code.clone(), chain_info.crypto_type.clone()).await?;
+    let account = Account::new(
+        params.user_code.clone(),
+        chain.chain_info.crypto_type.clone(),
+    )
+    .await?;
 
     // convert tx field
     let to = parse_data(&params.to)?;
@@ -269,21 +273,21 @@ pub async fn handle(
 
     let auto_tx_info = AutoTxInfo::new(req_key.clone(), chain_name, account);
 
-    let (hash, mut auto_tx) = match chain_info.chain_type {
-        ChainType::CitaCloud(_) => {
+    let (hash, mut auto_tx) = match chain.chain_client {
+        ChainClient::CitaCloud(_) => {
             let mut cita_cloud_auto_tx =
                 CitaCloudAutoTx::new(auto_tx_info, tx_data.clone(), timeout);
             let hash = cita_cloud_auto_tx.init_unsend(state.clone()).await?;
             let auto_tx = cita_cloud_auto_tx.to_unified_type();
             (hash, auto_tx)
         }
-        ChainType::Cita(_) => {
+        ChainClient::Cita(_) => {
             let mut cita_auto_tx = CitaAutoTx::new(auto_tx_info, tx_data.clone(), timeout);
             let hash = cita_auto_tx.init_unsend(state.clone()).await?;
             let auto_tx = cita_auto_tx.to_unified_type();
             (hash, auto_tx)
         }
-        ChainType::Eth(_) => {
+        ChainClient::Eth(_) => {
             let mut eth_auto_tx = EthAutoTx::new(auto_tx_info, tx_data.clone());
             let hash = eth_auto_tx.init_unsend(state.clone()).await?;
             let auto_tx = eth_auto_tx.to_unified_type();
@@ -298,7 +302,7 @@ pub async fn handle(
 
     info!(
         "receive send_tx request: req_key: {}, user_code: {}\n\tChainInfo: {}\n\tTxInfo: {}\n\tinitial hash: 0x{}",
-        req_key, params.user_code, chain_info, tx_data, hash.clone()
+        req_key, params.user_code, chain, tx_data, hash.clone()
     );
 
     ok(json!({

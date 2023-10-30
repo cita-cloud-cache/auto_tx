@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 pub struct Config {
     pub port: u16,
     pub kms_url: String,
-    pub config_center_url: String,
+    pub consul_dir: String,
     pub log_config: LogConfig,
     pub consul_config: Option<ConsulConfig>,
     pub max_timeout: u32,
@@ -34,7 +34,7 @@ impl Default for Config {
         Self {
             port: 3000,
             kms_url: Default::default(),
-            config_center_url: Default::default(),
+            consul_dir: "chain-cache/".to_string(),
             log_config: Default::default(),
             max_timeout: 600,
             process_interval: 5,

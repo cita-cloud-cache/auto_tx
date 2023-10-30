@@ -1,5 +1,5 @@
 use super::{AutoTx, AutoTxInfo, AutoTxTag, AutoTxType, TxData};
-use crate::chains::{ChainType, Chains};
+use crate::chains::{ChainClient, Chains};
 use crate::kms::Kms;
 use crate::AutoTxGlobalState;
 use anyhow::{anyhow, Result};
@@ -133,8 +133,8 @@ impl AutoTx for CitaCloudAutoTx {
     }
 
     async fn update_gas(&mut self, chains: &Chains, self_update: bool) -> Result<()> {
-        let chain_info = chains.get_chain_info(&self.auto_tx_info.chain_name).await?;
-        if let ChainType::CitaCloud(mut client) = chain_info.chain_type {
+        let chain_info = chains.get_chain(&self.auto_tx_info.chain_name).await?;
+        if let ChainClient::CitaCloud(mut client) = chain_info.chain_client {
             if self_update {
                 let quota_limit = client.get_gas_limit().await?;
                 let new_quota = quota_limit.min(self.tx.quota / 2 * 3);
@@ -165,9 +165,9 @@ impl AutoTx for CitaCloudAutoTx {
     async fn update_tx_if_timeout(&mut self, state: &AutoTxGlobalState) -> Result<bool> {
         let chain_info = state
             .chains
-            .get_chain_info(&self.auto_tx_info.chain_name)
+            .get_chain(&self.auto_tx_info.chain_name)
             .await?;
-        if let ChainType::CitaCloud(mut client) = chain_info.chain_type {
+        if let ChainClient::CitaCloud(mut client) = chain_info.chain_client {
             let client = client.controller_client.get_client_mut();
             let system_config = client.get_system_config(Empty {}).await?.into_inner();
             let current_height = client
@@ -236,12 +236,9 @@ impl AutoTx for CitaCloudAutoTx {
     }
 
     async fn send(&mut self, state: Arc<AutoTxGlobalState>) -> Result<()> {
-        let res = state
-            .chains
-            .get_chain_info(&self.auto_tx_info.chain_name)
-            .await;
+        let res = state.chains.get_chain(&self.auto_tx_info.chain_name).await;
         if let Ok(chain_info) = res {
-            if let ChainType::CitaCloud(mut client) = chain_info.chain_type {
+            if let ChainClient::CitaCloud(mut client) = chain_info.chain_client {
                 let controller_client = client.controller_client.get_client_mut();
 
                 // get sig
@@ -316,17 +313,14 @@ impl AutoTx for CitaCloudAutoTx {
 
             Ok(())
         } else {
-            Err(anyhow!("send failed: get_chain_info failed"))
+            Err(anyhow!("send failed: get_chain failed"))
         }
     }
 
     async fn check(&mut self, state: Arc<AutoTxGlobalState>) -> Result<()> {
-        let res = state
-            .chains
-            .get_chain_info(&self.auto_tx_info.chain_name)
-            .await;
+        let res = state.chains.get_chain(&self.auto_tx_info.chain_name).await;
         if let Ok(chain_info) = res {
-            if let ChainType::CitaCloud(mut client) = chain_info.chain_type {
+            if let ChainClient::CitaCloud(mut client) = chain_info.chain_client {
                 let evm_client = client.evm_client.get_client_mut();
 
                 // check receipt
@@ -393,7 +387,7 @@ impl AutoTx for CitaCloudAutoTx {
 
             Ok(())
         } else {
-            Err(anyhow!("check failed: get_chain_info failed"))
+            Err(anyhow!("check failed: get_chain failed"))
         }
     }
 }

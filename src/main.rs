@@ -106,7 +106,10 @@ pub struct AutoTxGlobalState {
 impl AutoTxGlobalState {
     fn new(config: Config) -> Self {
         Self {
-            chains: Chains::new(config.config_center_url),
+            chains: Chains::new(
+                config.consul_config.unwrap_or_default().consul_addr,
+                config.consul_dir,
+            ),
             storage: Storage::new(config.datadir),
             max_timeout: config.max_timeout,
             processing: Arc::new(RwLock::new(HashSet::new())),

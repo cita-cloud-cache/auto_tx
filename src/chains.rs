@@ -14,30 +14,31 @@
 
 use crate::send_tx::{cita::CitaClient, cita_cloud::CitaCloudClient, eth::EthClient};
 use anyhow::Result;
+use common_rs::consul;
+use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 use tokio::sync::RwLock;
 
 #[derive(Clone)]
-pub enum ChainType {
+pub enum ChainClient {
     CitaCloud(CitaCloudClient),
     Cita(CitaClient),
     Eth(EthClient),
 }
 
-impl Display for ChainType {
+impl Display for ChainClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self {
-            ChainType::CitaCloud(_) => write!(f, "CitaCloud"),
-            ChainType::Cita(_) => write!(f, "Cita"),
-            ChainType::Eth(_) => write!(f, "Eth"),
+            ChainClient::CitaCloud(_) => write!(f, "CitaCloud"),
+            ChainClient::Cita(_) => write!(f, "Cita"),
+            ChainClient::Eth(_) => write!(f, "Eth"),
         }
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct ChainInfo {
-    pub chain_name: String,
-    pub chain_type: ChainType,
+    pub chain_type: String,
     pub crypto_type: String,
     pub chain_url: String,
 }
@@ -46,87 +47,93 @@ impl Display for ChainInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "chain_name: {}, chain_type: {}, crypto_type: {}, chain_url: {}",
-            self.chain_name, self.chain_type, self.crypto_type, self.chain_url
+            "chain_type: {}, crypto_type: {}, chain_url: {}",
+            self.chain_type, self.crypto_type, self.chain_url
         )
     }
 }
 
 impl ChainInfo {
-    pub fn new(
-        chain_name: &str,
-        chain_type: ChainType,
-        crypto_type: &str,
-        chain_url: &str,
-    ) -> Self {
+    pub fn new(chain_type: &str, crypto_type: &str, chain_url: &str) -> Self {
         Self {
-            chain_name: chain_name.to_string(),
-            chain_type,
-            crypto_type: crypto_type.into(),
+            chain_type: chain_type.to_string(),
+            crypto_type: crypto_type.to_string(),
             chain_url: chain_url.to_string(),
         }
     }
 }
 
+#[derive(Clone)]
+pub struct Chain {
+    pub chain_name: String,
+    pub chain_info: ChainInfo,
+    pub chain_client: ChainClient,
+}
+
+impl Display for Chain {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "chain_name: {}, chain_info: {}",
+            self.chain_name, self.chain_info
+        )
+    }
+}
+
+impl Chain {
+    fn new(chain_name: &str, chain_info: ChainInfo) -> Result<Self> {
+        let chain_type = chain_info.chain_type.to_lowercase();
+        let chain_client = match chain_type.as_str() {
+            "cita-cloud" => ChainClient::CitaCloud(CitaCloudClient::new(&chain_info.chain_url)?),
+            "cita" => ChainClient::Cita(CitaClient::new(&chain_info.chain_url)?),
+            "eth" => ChainClient::Eth(EthClient::new(&chain_info.chain_url)?),
+            s => unimplemented!("not support chain_type: {s}"),
+        };
+        let chain = Chain {
+            chain_name: chain_name.to_string(),
+            chain_info,
+            chain_client,
+        };
+
+        Ok(chain)
+    }
+}
+
 #[derive(Clone, Debug)]
 struct ConfigCenter {
-    _url: String,
+    url: String,
+    consul_dir: String,
 }
 
 impl ConfigCenter {
-    const fn new(url: String) -> Self {
-        Self { _url: url }
+    const fn new(url: String, consul_dir: String) -> Self {
+        Self { url, consul_dir }
     }
 
-    fn request_chain_info(&self, _chain_name: &str) -> Result<ChainInfo> {
-        todo!()
+    async fn request_chain_info(&self, chain_name: &str) -> Result<Chain> {
+        let str =
+            consul::read_raw_key(&self.url, &(self.consul_dir.clone() + chain_name)).await?;
+        let chain_info: ChainInfo = serde_json::from_str(str.as_str())?;
+        Chain::new(chain_name, chain_info)
     }
 }
 
 #[derive(Clone)]
 pub struct Chains {
-    serve_chains: Arc<RwLock<HashMap<String, ChainInfo>>>,
+    serve_chains: Arc<RwLock<HashMap<String, Chain>>>,
     config_center: ConfigCenter,
 }
 
 impl Chains {
-    pub fn new(url: String) -> Self {
-        let mut chains = HashMap::new();
-        // for test
-        chains.insert(
-            "cita-cloud".to_string(),
-            ChainInfo::new(
-                "cita-cloud",
-                ChainType::CitaCloud(CitaCloudClient::new("http://127.0.0.1").unwrap()),
-                "SM2",
-                "http://127.0.0.1",
-            ),
-        );
-        chains.insert(
-            "cita".to_string(),
-            ChainInfo::new(
-                "cita",
-                ChainType::Cita(CitaClient::new("http://192.168.160.27:1337").unwrap()),
-                "SM2",
-                "http://192.168.160.27:1337",
-            ),
-        );
-        chains.insert(
-            "eth".to_string(),
-            ChainInfo::new(
-                "eth",
-                ChainType::Eth(EthClient::new("http://192.168.120.0:8545").unwrap()),
-                "Secp256k1",
-                "http://192.168.120.0:8545",
-            ),
-        );
+    pub fn new(url: String, consul_dir: String) -> Self {
+        let chains = HashMap::new();
         Self {
             serve_chains: Arc::new(RwLock::new(chains)),
-            config_center: ConfigCenter::new(url),
+            config_center: ConfigCenter::new(url, consul_dir),
         }
     }
 
-    pub async fn get_chain_info(&self, chain_name: &str) -> Result<ChainInfo> {
+    pub async fn get_chain(&self, chain_name: &str) -> Result<Chain> {
         let read_guard = self.serve_chains.read().await;
 
         if let Some(info) = read_guard.get(chain_name) {
@@ -139,7 +146,7 @@ impl Chains {
 
         let chain_info = write_guard
             .entry(chain_name.to_string())
-            .or_insert(self.config_center.request_chain_info(chain_name)?)
+            .or_insert(self.config_center.request_chain_info(chain_name).await?)
             .to_owned();
 
         Ok(chain_info)
