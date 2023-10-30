@@ -59,7 +59,7 @@ Options:
 
 `data`: 交易中的`data`字段
 
-`value`: 交易中的`value`字段，可选
+`value`: 交易中的`value`字段，表示交易发送的原生代币的值，十进制数字的字符串形式，单位`wei`，可选
 
 `timeout`: 目标链类型为`cita`或`cita-cloud`时有效，表示交易超时时间，发送交易任务会在`timeout`内得到结果，上限600s，可选
 
@@ -71,7 +71,7 @@ curl -X POST "http://127.0.0.1:4000/api/$chain_name/send_tx" \
           "user_code": "$user_code",
           "to": "0x1879C8B68c50A4D4eeC9852325d32B60B43f3FbD",
           "data": "0xabcd1234",
-          "value": "0x0",
+          "value": "0",
           "timeout": 300
          }'
 ```
