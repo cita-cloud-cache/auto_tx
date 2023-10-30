@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use crate::send_tx::{cita::CitaClient, cita_cloud::CitaCloudClient, eth::EthClient};
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use common_rs::consul;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt::Display, sync::Arc};
@@ -81,12 +81,32 @@ impl Display for Chain {
 }
 
 impl Chain {
-    fn new(chain_name: &str, chain_info: ChainInfo) -> Result<Self> {
+    async fn new(chain_name: &str, chain_info: ChainInfo) -> Result<Self> {
         let chain_type = chain_info.chain_type.to_lowercase();
         let chain_client = match chain_type.as_str() {
-            "cita-cloud" => ChainClient::CitaCloud(CitaCloudClient::new(&chain_info.chain_url)?),
-            "cita" => ChainClient::Cita(CitaClient::new(&chain_info.chain_url)?),
-            "eth" => ChainClient::Eth(EthClient::new(&chain_info.chain_url)?),
+            "cita-cloud" => {
+                let mut client = CitaCloudClient::new(&chain_info.chain_url)?;
+                client
+                    .get_gas_limit()
+                    .await
+                    .map_err(|_| anyhow!("cita-cloud url check failed"))?;
+                ChainClient::CitaCloud(client)
+            }
+            "cita" => {
+                let client = CitaClient::new(&chain_info.chain_url)?;
+                client
+                    .get_gas_limit()
+                    .map_err(|_| anyhow!("cita url check failed"))?;
+                ChainClient::Cita(client)
+            }
+            "eth" => {
+                let client = EthClient::new(&chain_info.chain_url)?;
+                client
+                    .get_gas_limit()
+                    .await
+                    .map_err(|_| anyhow!("eth url check failed"))?;
+                ChainClient::Eth(client)
+            }
             s => unimplemented!("not support chain_type: {s}"),
         };
         let chain = Chain {
@@ -94,6 +114,8 @@ impl Chain {
             chain_info,
             chain_client,
         };
+
+        info!("chains update: {chain}");
 
         Ok(chain)
     }
@@ -113,7 +135,7 @@ impl ConfigCenter {
     async fn request_chain_info(&self, chain_name: &str) -> Result<Chain> {
         let str = consul::read_raw_key(&self.url, &(self.consul_dir.clone() + chain_name)).await?;
         let chain_info: ChainInfo = serde_json::from_str(str.as_str())?;
-        Chain::new(chain_name, chain_info)
+        Chain::new(chain_name, chain_info).await
     }
 }
 

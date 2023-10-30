@@ -28,7 +28,7 @@ impl EthClient {
         Ok(Self { web3 })
     }
 
-    async fn get_gas_limit(&self) -> Result<U256> {
+    pub async fn get_gas_limit(&self) -> Result<U256> {
         let gas_limit = self
             .web3
             .eth()

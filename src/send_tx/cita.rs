@@ -44,7 +44,7 @@ impl CitaClient {
         }
     }
 
-    fn get_gas_limit(&self) -> Result<u64> {
+    pub fn get_gas_limit(&self) -> Result<u64> {
         let resp = self
             .client
             .call(

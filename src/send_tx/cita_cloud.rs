@@ -39,7 +39,7 @@ impl CitaCloudClient {
         })
     }
 
-    async fn get_gas_limit(&mut self) -> Result<u64> {
+    pub async fn get_gas_limit(&mut self) -> Result<u64> {
         let client = self.controller_client.get_client_mut();
         let system_config = client.get_system_config(Empty {}).await?.into_inner();
         let gas_limit = system_config.quota_limit as u64;
