@@ -91,7 +91,17 @@ async fn sign_message(user_code: &str, crypto_type: &str, message: &str) -> Resu
         return Err(anyhow::anyhow!(resp.message));
     }
 
-    parse_data(&sig)
+    let mut sig_vec = parse_data(&sig)?;
+
+    if crypto_type.to_lowercase() == "secp256k1" {
+        match sig_vec[64] {
+            27 => sig_vec[64] = 0,
+            28 => sig_vec[64] = 1,
+            _ => {}
+        }
+    }
+
+    Ok(sig_vec)
 }
 
 #[axum::async_trait]
@@ -159,7 +169,7 @@ impl Key for Account {
 
         let r = H256::from_slice(&sig_vec[0..32]);
         let s = H256::from_slice(&sig_vec[32..64]);
-        let v = sig_vec[64] - 27;
+        let v = sig_vec[64];
 
         Ok(Signature { r, s, v: v.into() })
     }
