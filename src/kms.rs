@@ -150,8 +150,8 @@ impl Kms for Account {
         self.address.clone()
     }
 
-    async fn sign(&self, tx_bytes: &str) -> Result<Vec<u8>> {
-        sign_message(&self.user_code, &self.crypto_type, tx_bytes).await
+    async fn sign(&self, msg: &str) -> Result<Vec<u8>> {
+        sign_message(&self.user_code, &self.crypto_type, msg).await
     }
 }
 
@@ -165,8 +165,8 @@ impl Key for Account {
         unreachable!("only support EIP1559TX")
     }
 
-    async fn sign_message(&self, tx_bytes: &[u8]) -> std::result::Result<Signature, SigningError> {
-        let sig_vec = sign_message(&self.user_code, &self.crypto_type, &hex::encode(tx_bytes))
+    async fn sign_message(&self, msg: &[u8]) -> std::result::Result<Signature, SigningError> {
+        let sig_vec = sign_message(&self.user_code, &self.crypto_type, &hex::encode(msg))
             .await
             .map_err(|_| SigningError::InvalidMessage)?;
 

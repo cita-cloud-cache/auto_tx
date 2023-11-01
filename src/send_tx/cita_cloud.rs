@@ -242,13 +242,11 @@ impl AutoTx for CitaCloudAutoTx {
                 let controller_client = client.controller_client.get_client_mut();
 
                 // get sig
-                let tx: CitaCloudlTransaction = self.tx.clone().into();
-                let tx_bytes = {
-                    let mut buf = Vec::with_capacity(tx.encoded_len());
-                    tx.encode(&mut buf).unwrap();
-                    hex::encode(buf)
-                };
-                let sig = self.auto_tx_info.account.sign(&tx_bytes).await?;
+                let sig = self
+                    .auto_tx_info
+                    .account
+                    .sign(&self.get_current_hash())
+                    .await?;
 
                 // organize RawTransaction
                 let raw_tx = {
