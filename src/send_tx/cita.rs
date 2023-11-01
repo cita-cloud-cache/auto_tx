@@ -280,11 +280,10 @@ impl AutoTx for CitaAutoTx {
 
     async fn update_current_hash(&mut self, _chains: &Chains) -> Result<String> {
         let tx: CitaTransaction = self.tx.clone().into();
-        let tx_bytes: Vec<u8> = tx.write_to_bytes()?;
-        let message_hash = hex::encode(self.auto_tx_info.account.hash(&tx_bytes));
+        let tx_bytes = hex::encode(tx.write_to_bytes()?);
 
         // get sig
-        let sig = self.auto_tx_info.account.sign(&message_hash).await?;
+        let sig = self.auto_tx_info.account.sign(&tx_bytes).await?;
 
         // organize UnverifiedTransaction
         let mut unverified_tx = UnverifiedTransaction::new();

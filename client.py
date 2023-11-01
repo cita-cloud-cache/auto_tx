@@ -1,7 +1,8 @@
 import requests
 import time
 
-target = "http://124.71.204.213/auto_api/"
+# target = "http://124.71.204.213/auto_api/"
+target = "http://127.0.0.1:3000/"
 
 chain_name = "cita-cloud-test"
 

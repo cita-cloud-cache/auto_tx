@@ -30,7 +30,7 @@ struct AddrResponseData {
 
 async fn get_user_address(user_code: &str, crypto_type: &str) -> Result<Vec<u8>> {
     let client = reqwest::Client::new();
-    let kms_url = KMS.get().unwrap().clone() + "/api/keys";
+    let kms_url = KMS.get().unwrap().clone() + "/api/v1/keys/noAuth/key";
 
     let data = serde_json::json!({
         "user_code": user_code,
@@ -64,11 +64,12 @@ struct SignResponse {
 #[derive(Deserialize, Debug)]
 struct SignResponseData {
     signature: String,
+    public_key: String,
 }
 
 async fn sign_message(user_code: &str, crypto_type: &str, message: &str) -> Result<Vec<u8>> {
     let client = reqwest::Client::new();
-    let kms_url = KMS.get().unwrap().clone() + "/api/keys/sign";
+    let kms_url = KMS.get().unwrap().clone() + "/api/v1/keys/noAuth/sign";
 
     let data = serde_json::json!({
         "user_code": user_code,
@@ -92,13 +93,19 @@ async fn sign_message(user_code: &str, crypto_type: &str, message: &str) -> Resu
     }
 
     let mut sig_vec = parse_data(&sig)?;
-
-    if crypto_type.to_lowercase() == "secp256k1" {
-        match sig_vec[64] {
-            27 => sig_vec[64] = 0,
-            28 => sig_vec[64] = 1,
-            _ => {}
+    match crypto_type.to_lowercase().as_str() {
+        "secp256k1" => {
+            match sig_vec[64] {
+                27 => sig_vec[64] = 0,
+                28 => sig_vec[64] = 1,
+                _ => {}
+            };
         }
+        "sm2" => {
+            let public_key = parse_data(&resp.data.public_key)?[1..].to_vec();
+            sig_vec.extend(public_key);
+        }
+        _ => unreachable!(),
     }
 
     Ok(sig_vec)
@@ -143,8 +150,8 @@ impl Kms for Account {
         self.address.clone()
     }
 
-    async fn sign(&self, msg: &str) -> Result<Vec<u8>> {
-        sign_message(&self.user_code, &self.crypto_type, msg).await
+    async fn sign(&self, tx_bytes: &str) -> Result<Vec<u8>> {
+        sign_message(&self.user_code, &self.crypto_type, tx_bytes).await
     }
 }
 
@@ -158,8 +165,8 @@ impl Key for Account {
         unreachable!("only support EIP1559TX")
     }
 
-    async fn sign_message(&self, message: &[u8]) -> std::result::Result<Signature, SigningError> {
-        let sig_vec = sign_message(&self.user_code, &self.crypto_type, &hex::encode(message))
+    async fn sign_message(&self, tx_bytes: &[u8]) -> std::result::Result<Signature, SigningError> {
+        let sig_vec = sign_message(&self.user_code, &self.crypto_type, &hex::encode(tx_bytes))
             .await
             .map_err(|_| SigningError::InvalidMessage)?;
 
