@@ -5,6 +5,7 @@ use crate::storage::AutoTxResult;
 use crate::util::{add_0x, remove_0x};
 use crate::AutoTxGlobalState;
 use anyhow::{anyhow, Result};
+use cita_tool::client::basic::STORE_ADDRESS;
 use cita_tool::{
     client::basic::{Client, ClientExt},
     Crypto, LowerHex, ParamsValue, ProtoMessage, ResponseValue, Transaction as CitaTransaction,
@@ -78,6 +79,7 @@ pub struct CitaTransactionForSerde {
     pub to_v1: Vec<u8>,
     pub chain_id: u32,
     pub chain_id_v1: Vec<u8>,
+    pub is_store: bool,
 }
 
 impl From<CitaTransactionForSerde> for CitaTransaction {
@@ -117,12 +119,14 @@ impl CitaAutoTx {
     pub fn new(auto_tx_info: AutoTxInfo, tx_data: TxData, remain_time: u32) -> Self {
         let to_v1 = tx_data.to.clone();
         let to = hex::encode(&to_v1);
+        let is_store = to == STORE_ADDRESS;
         let tx = CitaTransactionForSerde {
             data: tx_data.data,
             value: tx_data.value.0,
             nonce: auto_tx_info.req_key.clone(),
             to,
             to_v1,
+            is_store,
             ..Default::default()
         };
         Self {
@@ -140,6 +144,10 @@ impl CitaAutoTx {
 
     pub fn is_create(&self) -> bool {
         self.tx.to_v1.is_empty()
+    }
+
+    pub fn is_store(&self) -> bool {
+        self.tx.is_store
     }
 }
 
@@ -172,7 +180,7 @@ impl AutoTx for CitaAutoTx {
                 let quota_limit = cita_client.get_gas_limit()?;
                 let new_quota = quota_limit.min(self.tx.quota * 2);
                 self.tx.quota = new_quota
-            } else if self.is_create() {
+            } else if self.is_create() || self.is_store() {
                 self.tx.quota = 3_000_000;
             } else {
                 let from_str = add_0x(hex::encode(self.auto_tx_info.account.address()));

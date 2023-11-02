@@ -16,6 +16,7 @@ use cita_cloud_proto::controller::{
 use cita_cloud_proto::evm::rpc_service_client::RpcServiceClient as EvmRpcServiceClient;
 use cita_cloud_proto::executor::CallRequest;
 use cita_cloud_proto::retry::RetryClient;
+use cita_tool::client::basic::STORE_ADDRESS;
 use ethabi::ethereum_types::U256;
 use prost::Message;
 use serde::{Deserialize, Serialize};
@@ -109,6 +110,10 @@ impl CitaCloudAutoTx {
     pub const fn get_remain_time(&self) -> u32 {
         self.remain_time
     }
+
+    pub fn is_store(&self) -> bool {
+        hex::encode(&self.tx.to) == STORE_ADDRESS
+    }
 }
 
 #[axum::async_trait]
@@ -140,6 +145,8 @@ impl AutoTx for CitaCloudAutoTx {
                 let quota_limit = client.get_gas_limit().await?;
                 let new_quota = quota_limit.min(self.tx.quota / 2 * 3);
                 self.tx.quota = new_quota
+            } else if self.is_store() {
+                self.tx.quota = 3000000;
             } else {
                 let call = CallRequest {
                     from: self.auto_tx_info.account.address(),
