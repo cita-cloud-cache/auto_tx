@@ -383,7 +383,7 @@ impl AutoTx for CitaCloudAutoTx {
                                     hash
                                 );
                                 let result =
-                                    AutoTxResult::failed(hash, "execute failed: ".to_string() + &s);
+                                    AutoTxResult::failed(hash, "execute failed: ".to_string() + s);
                                 self.store_done(&state.storage, result).await?;
                             }
                         }

@@ -19,33 +19,33 @@ pub enum AutoTxResult {
     FailedInfo(FailedInfo),
 }
 impl AutoTxResult {
-    pub fn success(hash: String, contract_address: Option<String>) -> Self {
+    pub const fn success(hash: String, contract_address: Option<String>) -> Self {
         Self::SuccessInfo(SuccessInfo {
             hash,
             contract_address,
         })
     }
 
-    pub fn failed(hash: String, info: String) -> Self {
+    pub const fn failed(hash: String, info: String) -> Self {
         Self::FailedInfo(FailedInfo { hash, info })
     }
 
-    pub fn to_json(self) -> Value {
+    pub fn to_json(&self) -> Value {
         match self {
-            AutoTxResult::SuccessInfo(s) => match s.contract_address {
+            AutoTxResult::SuccessInfo(s) => match s.contract_address.clone() {
                 Some(addr) => json!({
                     "is_success": true,
-                    "onchain_hash": add_0x(s.hash),
+                    "onchain_hash": add_0x(s.hash.clone()),
                     "contract_address": add_0x(addr),
                 }),
                 None => json!({
                     "is_success": true,
-                    "onchain_hash": add_0x(s.hash),
+                    "onchain_hash": add_0x(s.hash.clone()),
                 }),
             },
             AutoTxResult::FailedInfo(f) => json!({
                 "is_success": false,
-                "last_hash": add_0x(f.hash),
+                "last_hash": add_0x(f.hash.clone()),
                 "err": f.info,
             }),
         }

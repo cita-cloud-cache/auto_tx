@@ -146,7 +146,7 @@ impl CitaAutoTx {
         self.tx.to_v1.is_empty()
     }
 
-    pub fn is_store(&self) -> bool {
+    pub const fn is_store(&self) -> bool {
         self.tx.is_store
     }
 }
@@ -441,7 +441,7 @@ impl AutoTx for CitaAutoTx {
                                     );
                                     let result = AutoTxResult::failed(
                                         hash,
-                                        "execute failed: ".to_string() + &s,
+                                        "execute failed: ".to_string() + s,
                                     );
                                     self.store_done(&state.storage, result).await?;
                                 }
