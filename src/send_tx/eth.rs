@@ -1,5 +1,6 @@
 use super::{AutoTx, AutoTxInfo, AutoTxTag, AutoTxType, TxData};
 use crate::chains::{ChainClient, Chains};
+use crate::storage::AutoTxResult;
 use crate::AutoTxGlobalState;
 use anyhow::{anyhow, Result};
 use ethabi::ethereum_types::{H256, U64};
@@ -212,7 +213,7 @@ impl AutoTx for EthAutoTx {
                                     .is_some()
                             {
                                 info!("unsend task: {} already success: {}", self.get_key(), e);
-                                self.store_done(&state.storage, None).await?;
+                                self.store_uncheck(&state.storage).await?;
                                 return Ok(());
                             }
                         }
@@ -252,7 +253,10 @@ impl AutoTx for EthAutoTx {
                                         self.get_key(),
                                         hash
                                     );
-                                    self.store_done(&state.storage, None).await?;
+                                    let contract_address =
+                                        r.contract_address.map(|s| s.to_string());
+                                    let result = AutoTxResult::success(hash, contract_address);
+                                    self.store_done(&state.storage, result).await?;
                                 }
                                 (Some(status), Some(used))
                                     if status == U64::from(0) && used == self.tx.gas.unwrap() =>
@@ -277,11 +281,10 @@ impl AutoTx for EthAutoTx {
                                         self.get_key(),
                                         hash
                                     );
-                                    self.store_done(
-                                        &state.storage,
-                                        Some("execute failed".to_string()),
-                                    )
-                                    .await?;
+
+                                    let result =
+                                        AutoTxResult::failed(hash, "execute failed".to_string());
+                                    self.store_done(&state.storage, result).await?;
                                 }
                             }
                         }

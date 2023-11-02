@@ -6,7 +6,7 @@ use crate::{
     chains::*,
     kms::Account,
     send_tx::{cita::CitaAutoTx, cita_cloud::CitaCloudAutoTx, eth::EthAutoTx},
-    storage::{AutoTxStorage, Storage},
+    storage::{AutoTxResult, AutoTxStorage, Storage},
     util::{add_0x, display_value, parse_data, parse_value},
     AutoTxGlobalState, RequestParams,
 };
@@ -51,14 +51,9 @@ pub trait AutoTx: Clone {
         Ok(())
     }
 
-    async fn store_done(&mut self, storage: &Storage, err: Option<String>) -> Result<()> {
+    async fn store_done(&mut self, storage: &Storage, result: AutoTxResult) -> Result<()> {
         let key = &self.get_key();
-        if let Some(e) = err {
-            storage.insert_done(key, e).await?;
-        } else {
-            let hash = self.get_current_hash();
-            storage.insert_done(key, hash).await?;
-        }
+        storage.insert_done(key, result).await?;
         Ok(())
     }
 
@@ -243,7 +238,7 @@ pub async fn handle(
         return Err(anyhow::anyhow!("field \"data\" missing").into());
     }
 
-    let req_key = params.user_code.clone() + req_key;
+    let req_key = params.user_code.clone() + "-" + req_key;
 
     // get timeout
     let timeout = {

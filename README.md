@@ -104,11 +104,13 @@ curl -X POST "http://127.0.0.1:4000/api/get_onchain_hash" \
      -d '{"user_code": "$user_code"}'
 ```
 
-响应：
+成功时响应：
 
 `is_success`: 任务的执行状态，`true`表示执行成功，`false`表示失败
 
-`result`: 任务的执行结果，执行成功时是链上的交易哈希，执行失败时是失败信息
+`onchain_hash`: 上链的交易哈希
+
+`contract_address`: 合约地址，如果是创建合约交易则会有这个字段
 
 
 ```
@@ -116,8 +118,40 @@ curl -X POST "http://127.0.0.1:4000/api/get_onchain_hash" \
     "code": 200,
     "data": {
         "is_success": true,
-        "result": "0x..."
+        "onchain_hash": "0x...",
+        "contract_address": "0x..."
     },
     "message": "OK"
+}
+```
+
+失败时响应：
+
+`is_success`: 任务的执行状态，`true`表示执行成功，`false`表示失败
+
+`last_hash`: 最后一次重试的交易哈希值
+
+`err`: 错误信息
+
+
+```
+{
+    "code": 200,
+    "data": {
+        "is_success": false,
+        "last_hash": "0x...",
+        "err": "timeout"
+    },
+    "message": "OK"
+}
+```
+
+无结果时响应：
+
+
+```
+{
+    "code": 500,
+    "message": "not found"
 }
 ```

@@ -1,7 +1,6 @@
-use crate::{storage::AutoTxStorage, util::add_0x, AutoTxGlobalState, RequestParams};
+use crate::{storage::AutoTxStorage, AutoTxGlobalState, RequestParams};
 use axum::{extract::State, http::HeaderMap, response::IntoResponse, Json};
 use common_rs::restful::{ok, RESTfulError};
-use serde_json::json;
 use std::sync::Arc;
 
 pub async fn get_onchain_hash(
@@ -24,16 +23,7 @@ pub async fn get_onchain_hash(
 
     let req_key = params.user_code.clone() + req_key;
 
-    let mut result = state.storage.get_done(&req_key).await?;
-    let is_success = if result.len() == 64 {
-        result = add_0x(result);
-        true
-    } else {
-        false
-    };
+    let result = state.storage.get_done(&req_key).await?;
 
-    ok(json!({
-        "is_success": is_success,
-        "result": result
-    }))
+    ok(result.to_json())
 }

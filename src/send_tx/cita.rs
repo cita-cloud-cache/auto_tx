@@ -1,6 +1,7 @@
 use super::{AutoTx, AutoTxInfo, AutoTxTag, AutoTxType, TxData};
 use crate::chains::{ChainClient, Chains};
 use crate::kms::Kms;
+use crate::storage::AutoTxResult;
 use crate::util::{add_0x, remove_0x};
 use crate::AutoTxGlobalState;
 use anyhow::{anyhow, Result};
@@ -267,8 +268,14 @@ impl AutoTx for CitaAutoTx {
                     Ok(true)
                 }
                 (true, false) => {
-                    self.store_done(&state.storage, Some("Err: timeout".to_string()))
-                        .await?;
+                    let hash = self.get_current_hash();
+                    warn!(
+                        "uncheck task: {} check failed: timeout, hash: {}",
+                        self.get_key(),
+                        hash
+                    );
+                    let result = AutoTxResult::failed(hash, "timeout".to_string());
+                    self.store_done(&state.storage, result).await?;
                     Ok(false)
                 }
                 (false, _) => Ok(false),
@@ -390,7 +397,18 @@ impl AutoTx for CitaAutoTx {
                                         self.get_key(),
                                         hash
                                     );
-                                    self.store_done(&state.storage, None).await?;
+
+                                    let contract_address = map
+                                        .get("contractAddress")
+                                        .map(|e| e.to_string())
+                                        .unwrap_or_default();
+                                    let contract_address = if contract_address == "null" {
+                                        None
+                                    } else {
+                                        Some(contract_address)
+                                    };
+                                    let result = AutoTxResult::success(hash, contract_address);
+                                    self.store_done(&state.storage, result).await?;
                                 }
                                 "\"Out of quota.\"" => {
                                     // self_update and resend
@@ -413,11 +431,11 @@ impl AutoTx for CitaAutoTx {
                                         s,
                                         hash
                                     );
-                                    self.store_done(
-                                        &state.storage,
-                                        Some("execute failed:".to_string() + s),
-                                    )
-                                    .await?;
+                                    let result = AutoTxResult::failed(
+                                        hash,
+                                        "execute failed: ".to_string() + &s,
+                                    );
+                                    self.store_done(&state.storage, result).await?;
                                 }
                             }
                         } else {

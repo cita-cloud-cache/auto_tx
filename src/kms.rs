@@ -42,10 +42,10 @@ async fn get_user_address(user_code: &str, crypto_type: &str) -> Result<Vec<u8>>
         .json(&data)
         .send()
         .await
-        .map_err(|_| anyhow!("get_user_address failed: send request failed"))?
+        .map_err(|e| anyhow!("get_user_address failed: {e}"))?
         .json::<AddrResponse>()
         .await
-        .map_err(|_| anyhow!("get_user_address failed: kms unavailable"))?;
+        .map_err(|e| anyhow!("get_user_address failed: {e}"))?;
 
     if resp.code != 200 {
         return Err(anyhow::anyhow!(resp.message));
@@ -82,10 +82,10 @@ async fn sign_message(user_code: &str, crypto_type: &str, message: &str) -> Resu
         .json(&data)
         .send()
         .await
-        .map_err(|_| anyhow!("sign_message failed: send request failed"))?
+        .map_err(|e| anyhow!("sign_message failed: {e}"))?
         .json::<SignResponse>()
         .await
-        .map_err(|_| anyhow!("sign_message failed: kms unavailable or parse json failed"))?;
+        .map_err(|e| anyhow!("sign_message failed: {e}"))?;
     let sig = resp.data.signature;
 
     if resp.code != 200 {
