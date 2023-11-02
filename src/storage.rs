@@ -36,7 +36,7 @@ impl AutoTxResult {
                 Some(addr) => json!({
                     "is_success": true,
                     "onchain_hash": add_0x(s.hash),
-                    "contract_address": addr,
+                    "contract_address": add_0x(addr),
                 }),
                 None => json!({
                     "is_success": true,
@@ -44,7 +44,7 @@ impl AutoTxResult {
                 }),
             },
             AutoTxResult::FailedInfo(f) => json!({
-                "is_success": true,
+                "is_success": false,
                 "last_hash": add_0x(f.hash),
                 "err": f.info,
             }),

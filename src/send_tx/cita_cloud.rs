@@ -2,6 +2,7 @@ use super::{AutoTx, AutoTxInfo, AutoTxTag, AutoTxType, TxData};
 use crate::chains::{ChainClient, Chains};
 use crate::kms::Kms;
 use crate::storage::AutoTxResult;
+use crate::util::remove_0x;
 use crate::AutoTxGlobalState;
 use anyhow::{anyhow, Result};
 use cita_cloud_proto::blockchain::{
@@ -87,12 +88,8 @@ pub struct CitaCloudAutoTx {
 
 impl CitaCloudAutoTx {
     pub fn new(auto_tx_info: AutoTxInfo, tx_data: TxData, remain_time: u32) -> Self {
-        let to = match tx_data.to.is_empty() {
-            true => vec![0u8; 20],
-            false => tx_data.to,
-        };
         let tx = CitaCloudlTransactionForSerde {
-            to,
+            to: tx_data.to,
             data: tx_data.data,
             value: tx_data.value.0,
             nonce: auto_tx_info.req_key.clone(),
@@ -112,7 +109,7 @@ impl CitaCloudAutoTx {
     }
 
     pub fn is_store(&self) -> bool {
-        hex::encode(&self.tx.to) == STORE_ADDRESS
+        hex::encode(&self.tx.to) == remove_0x(STORE_ADDRESS)
     }
 }
 
@@ -148,9 +145,13 @@ impl AutoTx for CitaCloudAutoTx {
             } else if self.is_store() {
                 self.tx.quota = 3000000;
             } else {
+                let to = match self.tx.to.is_empty() {
+                    true => vec![0u8; 20],
+                    false => self.tx.to.clone(),
+                };
                 let call = CallRequest {
                     from: self.auto_tx_info.account.address(),
-                    to: self.tx.to.clone(),
+                    to,
                     method: self.tx.data.clone(),
                     args: Vec::new(),
                     height: 0,
@@ -163,7 +164,7 @@ impl AutoTx for CitaCloudAutoTx {
                     .into_inner()
                     .bytes_quota;
                 let quota = U256::from_big_endian(bytes_quota.as_slice()).as_u64();
-                self.tx.quota = quota
+                self.tx.quota = quota / 2 * 3
             }
         }
 

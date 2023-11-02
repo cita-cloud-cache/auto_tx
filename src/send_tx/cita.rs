@@ -59,7 +59,7 @@ impl CitaClient {
             .map_err(|_| anyhow!("get_gas_limit failed"))?;
         if let Some(ResponseValue::Singe(gas_limit)) = resp.result() {
             let gas_limit_str = gas_limit.to_string();
-            let gas_limit = u64::from_str_radix(remove_0x(&gas_limit_str), 16).unwrap();
+            let gas_limit = u64::from_str_radix(&remove_0x(&gas_limit_str), 16).unwrap();
             Ok(gas_limit)
         } else {
             Err(anyhow!("get_gas_limit parse failed"))
@@ -119,7 +119,7 @@ impl CitaAutoTx {
     pub fn new(auto_tx_info: AutoTxInfo, tx_data: TxData, remain_time: u32) -> Self {
         let to_v1 = tx_data.to.clone();
         let to = hex::encode(&to_v1);
-        let is_store = to == STORE_ADDRESS;
+        let is_store = to == remove_0x(STORE_ADDRESS);
         let tx = CitaTransactionForSerde {
             data: tx_data.data,
             value: tx_data.value.0,
@@ -201,7 +201,7 @@ impl AutoTx for CitaAutoTx {
                         .estimate_quota(from, to, data, &height)
                         .map_err(|_| anyhow!("estimate_gas estimate_quota failed"))?;
                     if let Some(ResponseValue::Singe(ParamsValue::String(quota))) = resp.result() {
-                        let quota = u64::from_str_radix(remove_0x(&quota), 16)?;
+                        let quota = u64::from_str_radix(&remove_0x(&quota), 16)?;
                         self.tx.quota = quota / 2 * 3;
                     }
                 }
@@ -413,7 +413,7 @@ impl AutoTx for CitaAutoTx {
                                     let contract_address = if contract_address == "null" {
                                         None
                                     } else {
-                                        Some(contract_address)
+                                        Some(remove_0x(&contract_address))
                                     };
                                     let result = AutoTxResult::success(hash, contract_address);
                                     self.store_done(&state.storage, result).await?;

@@ -1,9 +1,11 @@
 import requests
 import time
 
-target = "http://192.168.120.9:3000/"
+# target = "http://192.168.120.9:3000/"
+target = "http://127.0.0.1:3000/"
 
-chain_name = "citacloud-shuwenlian"
+# chain_name = "citacloud-shuwenlian"
+chain_name = "cita-cloud-test"
 
 # send tx
 url = target + "api/" + chain_name + "/send_tx"

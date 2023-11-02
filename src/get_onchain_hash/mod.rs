@@ -21,7 +21,7 @@ pub async fn get_onchain_hash(
         return Err(anyhow::anyhow!("user_code missing").into());
     }
 
-    let req_key = params.user_code.clone() + req_key;
+    let req_key = params.user_code.clone() + "-" + req_key;
 
     let result = state.storage.get_done(&req_key).await?;
 

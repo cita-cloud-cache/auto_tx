@@ -1,7 +1,10 @@
 use anyhow::{anyhow, Context, Result};
 
-pub fn remove_0x(s: &str) -> &str {
-    s.trim_matches('\"').strip_prefix("0x").unwrap_or(s)
+pub fn remove_0x(s: &str) -> String {
+    s.trim_matches('\"')
+        .strip_prefix("0x")
+        .unwrap_or(s)
+        .to_string()
 }
 
 pub fn add_0x(s: String) -> String {
