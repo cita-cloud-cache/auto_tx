@@ -15,13 +15,12 @@ pub async fn get_onchain_hash(
         .get("request_key")
         .ok_or(anyhow::anyhow!("no request_key in header"))?
         .to_str()?;
+    let user_code = headers
+        .get("user_code")
+        .ok_or(anyhow::anyhow!("user_code missing"))?
+        .to_str()?;
 
-    // check params
-    if params.user_code.is_empty() {
-        return Err(anyhow::anyhow!("user_code missing").into());
-    }
-
-    let request_key = params.user_code.clone() + "-" + request_key;
+    let request_key = user_code.to_string() + "-" + request_key;
 
     let result = state.storage.get_done(&request_key).await?;
 

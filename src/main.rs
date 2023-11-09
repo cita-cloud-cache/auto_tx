@@ -210,9 +210,6 @@ async fn run(opts: RunOpts) -> Result<()> {
 #[serde(default)]
 pub struct RequestParams {
     #[serde(skip_serializing_if = "String::is_empty")]
-    user_code: String,
-
-    #[serde(skip_serializing_if = "String::is_empty")]
     to: String,
     #[serde(skip_serializing_if = "String::is_empty")]
     data: String,

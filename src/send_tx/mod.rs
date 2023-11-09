@@ -214,17 +214,28 @@ pub async fn handle_send_tx(
             e
         })?
         .to_str()?;
+    let user_code = headers
+        .get("user_code")
+        .ok_or(anyhow::anyhow!("user_code missing"))?
+        .to_str()?;
 
-    handle(request_key, Path(chain_name), State(state), Json(params))
-        .await
-        .map_err(|e| {
-            warn!("request: {} failed: {:?}", request_key, e);
-            e
-        })
+    handle(
+        request_key,
+        user_code,
+        Path(chain_name),
+        State(state),
+        Json(params),
+    )
+    .await
+    .map_err(|e| {
+        warn!("request: {} failed: {:?}", request_key, e);
+        e
+    })
 }
 
 pub async fn handle(
     request_key: &str,
+    user_code: &str,
     Path(chain_name): Path<String>,
     State(state): State<Arc<AutoTxGlobalState>>,
     Json(params): Json<RequestParams>,
@@ -232,14 +243,11 @@ pub async fn handle(
     debug!("params: {:?}", params);
 
     // check params
-    if params.user_code.is_empty() {
-        return Err(anyhow::anyhow!("user_code missing").into());
-    }
     if params.data.is_empty() {
         return Err(anyhow::anyhow!("field \"data\" missing").into());
     }
 
-    let request_key = params.user_code.clone() + "-" + request_key;
+    let request_key = user_code.to_string() + "-" + request_key;
 
     // get timeout
     let timeout = {
@@ -254,11 +262,7 @@ pub async fn handle(
     let chain = state.chains.get_chain(&chain_name).await?;
 
     // get account
-    let account = Account::new(
-        params.user_code.clone(),
-        chain.chain_info.crypto_type.clone(),
-    )
-    .await?;
+    let account = Account::new(user_code.to_string(), chain.chain_info.crypto_type.clone()).await?;
 
     // convert tx field
     let to = parse_data(&params.to)?;
@@ -334,7 +338,7 @@ pub async fn handle(
 
     info!(
         "receive send_tx request: request_key: {}, user_code: {}\n\tChainInfo: {}\n\tTxData: {}\n\tinitial hash: 0x{}",
-        request_key, params.user_code, chain, tx_data, hash.clone()
+        request_key, user_code, chain, tx_data, hash.clone()
     );
 
     ok(json!({
