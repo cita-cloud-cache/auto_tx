@@ -99,7 +99,7 @@ impl AutoTx for EthAutoTx {
     }
 
     fn get_key(&self) -> String {
-        self.auto_tx_info.req_key.clone()
+        self.auto_tx_info.request_key.clone()
     }
 
     fn get_current_hash(&self) -> String {

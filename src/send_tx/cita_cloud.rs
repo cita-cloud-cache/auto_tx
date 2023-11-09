@@ -92,7 +92,7 @@ impl CitaCloudAutoTx {
             to: tx_data.to,
             data: tx_data.data,
             value: tx_data.value.0,
-            nonce: auto_tx_info.req_key.clone(),
+            nonce: auto_tx_info.request_key.clone(),
             ..Default::default()
         };
         Self {
@@ -124,7 +124,7 @@ impl AutoTx for CitaCloudAutoTx {
     }
 
     fn get_key(&self) -> String {
-        self.auto_tx_info.req_key.clone()
+        self.auto_tx_info.request_key.clone()
     }
 
     fn get_current_hash(&self) -> String {

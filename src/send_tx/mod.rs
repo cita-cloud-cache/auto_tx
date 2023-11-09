@@ -123,15 +123,15 @@ impl TxData {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AutoTxInfo {
-    req_key: String,
+    request_key: String,
     chain_name: String,
     account: Account,
 }
 
 impl AutoTxInfo {
-    pub const fn new(req_key: String, chain_name: String, account: Account) -> Self {
+    pub const fn new(request_key: String, chain_name: String, account: Account) -> Self {
         Self {
-            req_key,
+            request_key,
             chain_name,
             account,
         }
@@ -186,16 +186,16 @@ impl AutoTxType {
     }
 
     pub async fn process(&mut self, state: Arc<AutoTxGlobalState>) -> Result<()> {
-        let req_key = self.get_key();
+        let request_key = self.get_key();
         let processing = state.processing.clone();
         let mut write = processing.write().await;
-        write.insert(req_key.clone());
+        write.insert(request_key.clone());
         let tag = self.get_tag();
         let result = match tag {
             AutoTxTag::Unsend => self.send(state).await,
             AutoTxTag::Uncheck => self.check(state).await,
         };
-        write.remove(&req_key);
+        write.remove(&request_key);
         result
     }
 }
@@ -206,25 +206,25 @@ pub async fn handle_send_tx(
     State(state): State<Arc<AutoTxGlobalState>>,
     Json(params): Json<RequestParams>,
 ) -> std::result::Result<impl IntoResponse, RESTfulError> {
-    let req_key = headers
-        .get("key")
+    let request_key = headers
+        .get("request_key")
         .ok_or_else(|| {
-            let e = anyhow::anyhow!("no req_key in header");
+            let e = anyhow::anyhow!("no request_key in header");
             warn!("request failed: {}", e);
             e
         })?
         .to_str()?;
 
-    handle(req_key, Path(chain_name), State(state), Json(params))
+    handle(request_key, Path(chain_name), State(state), Json(params))
         .await
         .map_err(|e| {
-            warn!("request: {} failed: {:?}", req_key, e);
+            warn!("request: {} failed: {:?}", request_key, e);
             e
         })
 }
 
 pub async fn handle(
-    req_key: &str,
+    request_key: &str,
     Path(chain_name): Path<String>,
     State(state): State<Arc<AutoTxGlobalState>>,
     Json(params): Json<RequestParams>,
@@ -239,7 +239,7 @@ pub async fn handle(
         return Err(anyhow::anyhow!("field \"data\" missing").into());
     }
 
-    let req_key = params.user_code.clone() + "-" + req_key;
+    let request_key = params.user_code.clone() + "-" + request_key;
 
     // get timeout
     let timeout = {
@@ -267,7 +267,7 @@ pub async fn handle(
     let value = parse_value(&params.value)?;
     let tx_data = TxData::new(to, data, value_u256, value);
 
-    let auto_tx_info = AutoTxInfo::new(req_key.clone(), chain_name, account);
+    let auto_tx_info = AutoTxInfo::new(request_key.clone(), chain_name, account);
 
     let (hash, mut auto_tx) = match chain.chain_client {
         ChainClient::CitaCloud(_) => {
@@ -282,12 +282,15 @@ pub async fn handle(
             if let Some(cita_create_config) = state.cita_create_config.as_ref() {
                 if tx_data.to.is_empty() && chain.chain_name == cita_create_config.chain_name {
                     info!(
-                        "receive cita create request: req_key: {}\n\tTxData: {}",
-                        &req_key, &tx_data
+                        "receive cita create request: request_key: {}\n\tTxData: {}",
+                        &request_key, &tx_data
                     );
-                    let resp =
-                        cita_create::send_cita_create(cita_create_config, &params.data, &req_key)
-                            .await?;
+                    let resp = cita_create::send_cita_create(
+                        cita_create_config,
+                        &params.data,
+                        &request_key,
+                    )
+                    .await?;
                     match resp.data {
                         Some(mut data) => {
                             if data.errMsg.is_empty() {
@@ -297,10 +300,10 @@ pub async fn handle(
                                     data.deployTxHash.clone(),
                                     Some(data.contractAddress),
                                 );
-                                state.storage.insert_done(&req_key, result).await?;
-                                info!("cita create request success: req_key: {}", &req_key);
+                                state.storage.insert_done(&request_key, result).await?;
+                                info!("cita create request success: request_key: {}", &request_key);
                                 return ok(json!({
-                                    "hash": data.deployTxHash,
+                                    "hash": add_0x(data.deployTxHash),
                                 }));
                             } else {
                                 return Err(err(500, data.errMsg));
@@ -330,8 +333,8 @@ pub async fn handle(
     });
 
     info!(
-        "receive send_tx request: req_key: {}, user_code: {}\n\tChainInfo: {}\n\tTxData: {}\n\tinitial hash: 0x{}",
-        req_key, params.user_code, chain, tx_data, hash.clone()
+        "receive send_tx request: request_key: {}, user_code: {}\n\tChainInfo: {}\n\tTxData: {}\n\tinitial hash: 0x{}",
+        request_key, params.user_code, chain, tx_data, hash.clone()
     );
 
     ok(json!({

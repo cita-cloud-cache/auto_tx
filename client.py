@@ -10,7 +10,7 @@ chain_name = "cita-cmc"
 # send tx
 url = target + "api/" + chain_name + "/send_tx"
 
-headers = {"Content-Type": "application/json", "key": "auto_tx_test"}
+headers = {"Content-Type": "application/json", "request_key": "auto_tx_test"}
 
 json = {
     "user_code": "did:bid:zf26MwL8MVDzjSQb6UMsam4r4pVqPzP93",

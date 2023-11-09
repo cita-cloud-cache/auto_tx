@@ -10,10 +10,10 @@ pub async fn get_onchain_hash(
 ) -> std::result::Result<impl IntoResponse, RESTfulError> {
     debug!("params: {:?}", params);
 
-    // get req_key
-    let req_key = headers
-        .get("key")
-        .ok_or(anyhow::anyhow!("no key in header"))?
+    // get request_key
+    let request_key = headers
+        .get("request_key")
+        .ok_or(anyhow::anyhow!("no request_key in header"))?
         .to_str()?;
 
     // check params
@@ -21,9 +21,9 @@ pub async fn get_onchain_hash(
         return Err(anyhow::anyhow!("user_code missing").into());
     }
 
-    let req_key = params.user_code.clone() + "-" + req_key;
+    let request_key = params.user_code.clone() + "-" + request_key;
 
-    let result = state.storage.get_done(&req_key).await?;
+    let result = state.storage.get_done(&request_key).await?;
 
     ok(result.to_json())
 }

@@ -123,7 +123,7 @@ impl CitaAutoTx {
         let tx = CitaTransactionForSerde {
             data: tx_data.data,
             value: tx_data.value.0,
-            nonce: auto_tx_info.req_key.clone(),
+            nonce: auto_tx_info.request_key.clone(),
             to,
             to_v1,
             is_store,
@@ -162,7 +162,7 @@ impl AutoTx for CitaAutoTx {
     }
 
     fn get_key(&self) -> String {
-        self.auto_tx_info.req_key.clone()
+        self.auto_tx_info.request_key.clone()
     }
 
     fn get_current_hash(&self) -> String {

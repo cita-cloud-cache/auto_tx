@@ -181,10 +181,10 @@ async fn run(opts: RunOpts) -> Result<()> {
                 Ok(auto_txs) => {
                     for mut auto_tx in auto_txs {
                         let state = state.clone();
-                        let req_key = auto_tx.get_key();
+                        let request_key = auto_tx.get_key();
                         let is_processing = {
                             let read = state.processing.read().await;
-                            read.contains(&req_key)
+                            read.contains(&request_key)
                         };
                         if !is_processing {
                             tokio::spawn(async move {
