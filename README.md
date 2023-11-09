@@ -67,8 +67,8 @@ Options:
 curl -X POST "http://127.0.0.1:4000/api/$chain_name/send_tx" \
      -H "Content-Type: application/json" \
      -H "request_key: $request_key" \
+     -H "user_code": "$user_code" \
      -d '{
-          "user_code": "$user_code",
           "to": "0x1879C8B68c50A4D4eeC9852325d32B60B43f3FbD",
           "data": "0xabcd1234",
           "value": "0",
@@ -101,7 +101,8 @@ curl -X POST "http://127.0.0.1:4000/api/$chain_name/send_tx" \
 curl -X POST "http://127.0.0.1:4000/api/get_onchain_hash" \
      -H "Content-Type: application/json" \
      -H "request_key: $request_key" \
-     -d '{"user_code": "$user_code"}'
+     -H "user_code": "$user_code" \
+     -d '{}'
 ```
 
 * 成功时响应：
