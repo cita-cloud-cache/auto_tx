@@ -76,7 +76,7 @@ curl -X POST "http://127.0.0.1:4000/api/$chain_name/send_tx" \
          }'
 ```
 
-响应：
+* 响应：
 
 `hash`: 初始哈希值，在不重试的情况下为上链哈希
 
@@ -104,7 +104,7 @@ curl -X POST "http://127.0.0.1:4000/api/get_onchain_hash" \
      -d '{"user_code": "$user_code"}'
 ```
 
-成功时响应：
+* 成功时响应：
 
 `is_success`: 任务的执行状态，`true`表示执行成功，`false`表示失败
 
@@ -125,7 +125,7 @@ curl -X POST "http://127.0.0.1:4000/api/get_onchain_hash" \
 }
 ```
 
-失败时响应：
+* 失败时响应：
 
 `is_success`: 任务的执行状态，`true`表示执行成功，`false`表示失败
 
@@ -146,7 +146,7 @@ curl -X POST "http://127.0.0.1:4000/api/get_onchain_hash" \
 }
 ```
 
-无结果时响应：
+* 无结果时响应：
 
 
 ```

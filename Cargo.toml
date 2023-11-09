@@ -30,6 +30,7 @@ prost = "0.12"
 web3 = { git = "https://github.com/Jayanring/rust-web3" }
 opendal = { version = "0.41", features = ["services-sled"] }
 cita-tool = "0.21.2"
+md5 = "0.7"
 
 [profile.release.package."*"]
 # Set the default for dependencies.

@@ -1,5 +1,6 @@
 pub mod cita;
 pub mod cita_cloud;
+pub mod cita_create;
 pub mod eth;
 
 use crate::{
@@ -7,7 +8,7 @@ use crate::{
     kms::Account,
     send_tx::{cita::CitaAutoTx, cita_cloud::CitaCloudAutoTx, eth::EthAutoTx},
     storage::{AutoTxResult, AutoTxStorage, Storage},
-    util::{add_0x, display_value, parse_data, parse_value},
+    util::{add_0x, display_value, parse_data, parse_value, remove_0x},
     AutoTxGlobalState, RequestParams,
 };
 use anyhow::{anyhow, Result};
@@ -17,7 +18,7 @@ use axum::{
     response::IntoResponse,
     Json,
 };
-use common_rs::restful::{ok, RESTfulError};
+use common_rs::restful::{err, ok, RESTfulError};
 use ethabi::ethereum_types::U256;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -277,6 +278,39 @@ pub async fn handle(
             (hash, auto_tx)
         }
         ChainClient::Cita(_) => {
+            // check if cita_create_config exist
+            if let Some(cita_create_config) = state.cita_create_config.as_ref() {
+                if tx_data.to.is_empty() && chain.chain_name == cita_create_config.chain_name {
+                    info!(
+                        "receive cita create request: req_key: {}\n\tTxData: {}",
+                        &req_key, &tx_data
+                    );
+                    let resp =
+                        cita_create::send_cita_create(cita_create_config, &params.data, &req_key)
+                            .await?;
+                    match resp.data {
+                        Some(mut data) => {
+                            if data.errMsg.is_empty() {
+                                data.contractAddress = remove_0x(&data.contractAddress);
+                                data.deployTxHash = remove_0x(&data.deployTxHash);
+                                let result = AutoTxResult::success(
+                                    data.deployTxHash.clone(),
+                                    Some(data.contractAddress),
+                                );
+                                state.storage.insert_done(&req_key, result).await?;
+                                info!("cita create request success: req_key: {}", &req_key);
+                                return ok(json!({
+                                    "hash": data.deployTxHash,
+                                }));
+                            } else {
+                                return Err(err(500, data.errMsg));
+                            }
+                        }
+                        None => return Err(err(resp.code as u16, resp.msg)),
+                    }
+                }
+            }
+
             let mut cita_auto_tx = CitaAutoTx::new(auto_tx_info, tx_data.clone(), timeout);
             let hash = cita_auto_tx.init_unsend(state.clone()).await?;
             let auto_tx = cita_auto_tx.to_unified_type();
@@ -296,7 +330,7 @@ pub async fn handle(
     });
 
     info!(
-        "receive send_tx request: req_key: {}, user_code: {}\n\tChainInfo: {}\n\tTxInfo: {}\n\tinitial hash: 0x{}",
+        "receive send_tx request: req_key: {}, user_code: {}\n\tChainInfo: {}\n\tTxData: {}\n\tinitial hash: 0x{}",
         req_key, params.user_code, chain, tx_data, hash.clone()
     );
 
