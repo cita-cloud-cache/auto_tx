@@ -36,7 +36,7 @@ hash = resp["data"]["hash"]
 print(f"send success, hash: {hash}")
 
 # get onchain hash
-url = target + "api/get_onchain_hash"
+url = target + "/api/get_onchain_hash"
 
 time.sleep(5)
 while True:
