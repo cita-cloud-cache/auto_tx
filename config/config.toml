@@ -1,6 +1,6 @@
 port = 80
 data_dir = "/cita/api/data"
-kms_url = "http://cita_kms.hackathon.cn40.apps.platform.sapcloud.cn"
+kms_url = "http://cita_kms.hackathon.cn40.apps.platform.sapcloud.cn/api/keys"
 
 [consul_config]
 consul_addr = "http://consul.rivtower.xyz"
