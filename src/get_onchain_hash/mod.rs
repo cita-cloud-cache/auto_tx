@@ -1,15 +1,12 @@
-use crate::{storage::AutoTxStorage, AutoTxGlobalState, RequestParams};
-use axum::{extract::State, http::HeaderMap, response::IntoResponse, Json};
+use crate::{storage::AutoTxStorage, AutoTxGlobalState};
+use axum::{extract::State, http::HeaderMap, response::IntoResponse};
 use common_rs::restful::{ok, RESTfulError};
 use std::sync::Arc;
 
 pub async fn get_onchain_hash(
     headers: HeaderMap,
     State(state): State<Arc<AutoTxGlobalState>>,
-    Json(params): Json<RequestParams>,
 ) -> std::result::Result<impl IntoResponse, RESTfulError> {
-    debug!("params: {:?}", params);
-
     // get request_key
     let request_key = headers
         .get("request_key")
