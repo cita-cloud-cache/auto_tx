@@ -98,10 +98,9 @@ curl -X POST "http://127.0.0.1:4000/api/$chain_name/send_tx" \
 `user_code`: 指定发送交易的用户，以该标识从`kms`获取
 
 ```
-curl -X POST "http://127.0.0.1:4000/api/get_onchain_hash" \
-     -H "Content-Type: application/json" \
+curl -X GET "http://127.0.0.1:4000/api/get_onchain_hash" \
      -H "request_key: $request_key" \
-     -d '{"user_code": "$user_code"}'
+     -H "user_code": "$user_code" \
 ```
 
 * 成功时响应：
