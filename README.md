@@ -100,7 +100,7 @@ curl -X POST "http://127.0.0.1:4000/api/$chain_name/send_tx" \
 ```
 curl -X GET "http://127.0.0.1:4000/api/get_onchain_hash" \
      -H "request_key: $request_key" \
-     -H "user_code": "$user_code" \
+     -H "user_code: $user_code" \
 ```
 
 * 成功时响应：
