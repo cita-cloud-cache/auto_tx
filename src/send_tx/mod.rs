@@ -1,5 +1,6 @@
 pub mod cita;
 pub mod cita_cloud;
+pub mod cita_create;
 pub mod eth;
 pub mod types;
 
@@ -81,25 +82,36 @@ pub async fn handle_send_tx(
     State(state): State<Arc<AutoTxGlobalState>>,
     Json(params): Json<RequestParams>,
 ) -> std::result::Result<impl IntoResponse, RESTfulError> {
-    let req_key = headers
-        .get("key")
+    let request_key = headers
+        .get("request_key")
         .ok_or_else(|| {
-            let e = anyhow::anyhow!("no req_key in header");
+            let e = anyhow::anyhow!("no request_key in header");
             warn!("request failed: {}", e);
             e
         })?
         .to_str()?;
+    let user_code = headers
+        .get("user_code")
+        .ok_or(anyhow::anyhow!("user_code missing"))?
+        .to_str()?;
 
-    handle(req_key, Path(chain_name), State(state), Json(params))
-        .await
-        .map_err(|e| {
-            warn!("request: {} failed: {:?}", req_key, e);
-            e
-        })
+    handle(
+        request_key,
+        user_code,
+        Path(chain_name),
+        State(state),
+        Json(params),
+    )
+    .await
+    .map_err(|e| {
+        warn!("request: {} failed: {:?}", request_key, e);
+        e
+    })
 }
 
 pub async fn handle(
-    req_key: &str,
+    request_key: &str,
+    user_code: &str,
     Path(chain_name): Path<String>,
     State(state): State<Arc<AutoTxGlobalState>>,
     Json(params): Json<RequestParams>,
@@ -107,9 +119,6 @@ pub async fn handle(
     debug!("params: {:?}", params);
 
     // check params
-    if params.user_code.is_empty() {
-        return Err(anyhow::anyhow!("user_code missing").into());
-    }
     if params.data.is_empty() {
         return Err(anyhow::anyhow!("field \"data\" missing").into());
     }

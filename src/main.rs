@@ -49,7 +49,7 @@ use common_rs::{
     consul,
     restful::{handle_http_error, ok_no_data, shutdown_signal},
 };
-use config::Config;
+use config::{CitaCreateConfig, Config};
 use figment::{
     providers::{Format, Toml},
     Figment,
@@ -109,6 +109,7 @@ pub struct AutoTxGlobalState {
     pub chains: Chains,
     pub storage: Storage,
     pub max_timeout: u32,
+    pub cita_create_config: Option<CitaCreateConfig>,
     pub processing: Arc<RwLock<HashSet<String>>>,
     pub fast_mode: bool,
 }
@@ -120,8 +121,9 @@ impl AutoTxGlobalState {
                 config.consul_config.unwrap_or_default().consul_addr,
                 config.consul_dir,
             ),
-            storage: Storage::new(config.datadir),
+            storage: Storage::new(config.data_dir),
             max_timeout: config.max_timeout,
+            cita_create_config: config.cita_create_config,
             processing: Arc::new(RwLock::new(HashSet::new())),
             fast_mode: config.fast_mode,
         }
@@ -141,6 +143,12 @@ async fn run(opts: RunOpts) -> Result<()> {
     cloud_util::tracer::init_tracer("auto_tx".to_string(), &config.log_config)
         .map_err(|e| println!("tracer init err: {e}"))
         .unwrap();
+
+    if let Some(config) = config.cita_create_config.as_ref() {
+        info!("CitaCreateConfig exist: chain_name: {}", config.chain_name);
+    } else {
+        info!("run without CitaCreateConfig")
+    }
 
     let addr = SocketAddr::from(([0, 0, 0, 0], config.port));
 
@@ -241,9 +249,6 @@ async fn run(opts: RunOpts) -> Result<()> {
 #[derive(Debug, Clone, Serialize, Default, Deserialize)]
 #[serde(default)]
 pub struct RequestParams {
-    #[serde(skip_serializing_if = "String::is_empty")]
-    user_code: String,
-
     #[serde(skip_serializing_if = "String::is_empty")]
     to: String,
     #[serde(skip_serializing_if = "String::is_empty")]

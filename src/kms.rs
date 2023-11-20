@@ -30,7 +30,7 @@ struct AddrResponseData {
 
 async fn get_user_address(user_code: &str, crypto_type: &str) -> Result<Vec<u8>> {
     let client = reqwest::Client::new();
-    let kms_url = KMS.get().unwrap().clone() + "/api/v1/keys/noAuth/key";
+    let kms_url = KMS.get().unwrap().clone() + "/key";
 
     let data = serde_json::json!({
         "user_code": user_code,
@@ -69,7 +69,7 @@ struct SignResponseData {
 
 async fn sign_message(user_code: &str, crypto_type: &str, message: &str) -> Result<Vec<u8>> {
     let client = reqwest::Client::new();
-    let kms_url = KMS.get().unwrap().clone() + "/api/v1/keys/noAuth/sign";
+    let kms_url = KMS.get().unwrap().clone() + "/sign";
 
     let data = serde_json::json!({
         "user_code": user_code,

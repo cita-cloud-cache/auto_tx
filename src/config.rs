@@ -16,34 +16,59 @@ use cloud_util::tracer::LogConfig;
 use common_rs::consul::ConsulConfig;
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct CitaCreateConfig {
+    pub chain_name: String,
+
+    pub create_url: String,
+
+    pub accessid: String,
+    pub access_secret: String,
+    pub appid: String,
+    pub appsecret: String,
+    pub verify: String,
+    pub dapp_name: String,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
     pub port: u16,
+
     pub kms_url: String,
-    pub consul_dir: String,
+
     pub log_config: LogConfig,
-    pub consul_config: Option<ConsulConfig>,
-    pub max_timeout: u32,
     pub process_interval: u64,
-    pub datadir: String,
 
     pub fast_mode: bool,
+    pub max_timeout: u32,
+    pub data_dir: String,
+
+    pub cita_create_config: Option<CitaCreateConfig>,
+
+    pub consul_config: Option<ConsulConfig>,
+    pub consul_dir: String,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
             port: 3000,
+
             kms_url: Default::default(),
-            consul_dir: "chain-cache/".to_string(),
+
             log_config: Default::default(),
             max_timeout: 600,
             process_interval: 5,
-            datadir: "./data".to_string(),
+            data_dir: "./data".to_string(),
+
+            cita_create_config: None,
+
             consul_config: Default::default(),
 
             fast_mode: false,
+            consul_dir: "chain-cache/".to_string(),
         }
     }
 }
