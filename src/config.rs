@@ -27,6 +27,8 @@ pub struct Config {
     pub max_timeout: u32,
     pub process_interval: u64,
     pub datadir: String,
+
+    pub fast_mode: bool,
 }
 
 impl Default for Config {
@@ -40,6 +42,8 @@ impl Default for Config {
             process_interval: 5,
             datadir: "./data".to_string(),
             consul_config: Default::default(),
+
+            fast_mode: false,
         }
     }
 }

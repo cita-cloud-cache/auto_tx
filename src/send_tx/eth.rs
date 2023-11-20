@@ -1,25 +1,45 @@
-use super::{AutoTx, AutoTxInfo, AutoTxTag, AutoTxType, TxData};
-use crate::chains::{ChainClient, Chains};
-use crate::storage::AutoTxResult;
-use crate::AutoTxGlobalState;
+use super::{types::*, AutoTx};
+use crate::kms::Account;
+use crate::storage::Storage;
 use anyhow::{anyhow, Result};
-use ethabi::ethereum_types::{H256, U64};
-use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use web3::types::{BlockId, BlockNumber};
+use ethabi::ethereum_types::{H160, H256, U64};
+use hex::ToHex;
+use web3::types::TransactionReceipt;
 use web3::{
     signing::Key,
     transports::Http,
-    types::{
-        Address, Bytes, CallRequest, SignedTransaction, TransactionParameters, TransactionRequest,
-        U256,
-    },
-    Error, Web3,
+    types::{Address, Bytes, CallRequest, SignedTransaction, TransactionParameters, U256},
+    types::{BlockId, BlockNumber},
+    Web3,
 };
+
+const TRASNACTION_TYPE: u64 = 2;
+
+impl From<&SendTask> for TransactionParameters {
+    fn from(value: &SendTask) -> Self {
+        let to = match value.send_data.tx_data.tx_type() {
+            TxType::Create => None,
+            TxType::Store | TxType::Normal => {
+                Some(Address::from_slice(&value.send_data.tx_data.to))
+            }
+        };
+        let gas = value.gas.gas;
+        let nonce = value.timeout.get_eth_timeout().nonce;
+        Self {
+            to,
+            value: value.send_data.tx_data.value.1,
+            data: Bytes(value.send_data.tx_data.data.clone()),
+            gas: U256::from(gas),
+            nonce: Some(nonce),
+            transaction_type: Some(U64::from(2)),
+            ..Default::default()
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct EthClient {
-    pub web3: Web3<Http>,
+    web3: Web3<Http>,
 }
 
 impl EthClient {
@@ -29,7 +49,7 @@ impl EthClient {
         Ok(Self { web3 })
     }
 
-    pub async fn get_gas_limit(&self) -> Result<U256> {
+    pub async fn get_gas_limit(&self) -> Result<u64> {
         let gas_limit = self
             .web3
             .eth()
@@ -38,283 +58,254 @@ impl EthClient {
             .ok_or(anyhow!("get_gas_limit get block failed"))?
             .gas_limit
             / 2;
-        Ok(gas_limit)
+        Ok(gas_limit.as_u64())
+    }
+
+    async fn web3_estimate_gas(&self, call_request: CallRequest) -> Result<u64> {
+        Ok(self
+            .web3
+            .eth()
+            .estimate_gas(call_request, None)
+            .await?
+            .as_u64())
+    }
+
+    async fn get_nonce(&self, address: Address) -> Result<U256> {
+        Ok(self.web3.eth().transaction_count(address, None).await?)
+    }
+
+    async fn sign_transaction(
+        &self,
+        tx: TransactionParameters,
+        signer: Account,
+    ) -> Result<SignedTransaction> {
+        Ok(self.web3.accounts().sign_transaction(tx, signer).await?)
+    }
+
+    async fn send_raw_transaction(&self, rlp: Bytes) -> Result<H256> {
+        Ok(self.web3.eth().send_raw_transaction(rlp).await?)
+    }
+
+    async fn transaction_receipt(&self, hash: H256) -> Result<Option<TransactionReceipt>> {
+        Ok(self.web3.eth().transaction_receipt(hash).await?)
     }
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct SignedTransactionForSerde {
-    pub raw_transaction: Bytes,
-    pub transaction_hash: H256,
-}
+impl EthClient {
+    pub async fn try_update_timeout(&mut self, from: Address, timeout: Timeout) -> Result<Timeout> {
+        let mut timeout = timeout.get_eth_timeout();
 
-impl From<SignedTransaction> for SignedTransactionForSerde {
-    fn from(value: SignedTransaction) -> Self {
-        Self {
-            raw_transaction: value.raw_transaction,
-            transaction_hash: value.transaction_hash,
-        }
+        let current_nonce = timeout.nonce;
+        let target_nonce = self.get_nonce(from).await?;
+        timeout.nonce = current_nonce.max(target_nonce);
+
+        Ok(Timeout::Eth(timeout))
     }
-}
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct EthAutoTx {
-    auto_tx_info: AutoTxInfo,
-    tx: TransactionRequest,
-    hash: SignedTransactionForSerde,
-    tag: AutoTxTag,
-}
-
-impl EthAutoTx {
-    pub fn new(auto_tx_info: AutoTxInfo, tx_data: TxData) -> Self {
-        let to = if tx_data.to.is_empty() {
-            None
-        } else {
-            Some(Address::from_slice(&tx_data.to))
-        };
-        let tx = TransactionRequest {
-            to,
-            value: Some(tx_data.value.1),
-            data: Some(Bytes(tx_data.data.clone())),
-            transaction_type: Some(U64::from(2)),
+    pub async fn estimate_gas(&mut self, send_data: SendData) -> Result<Gas> {
+        let call_request = CallRequest {
+            from: Some(send_data.account.address()),
+            to: Some(H160::from_slice(&send_data.tx_data.to)),
+            value: Some(send_data.tx_data.value.1),
+            data: Some(Bytes(send_data.tx_data.data.clone())),
+            transaction_type: Some(TRASNACTION_TYPE.into()),
             ..Default::default()
         };
-        Self {
-            auto_tx_info,
-            tx,
-            hash: SignedTransactionForSerde::default(),
-            tag: AutoTxTag::Unsend,
+        let gas = self.web3_estimate_gas(call_request).await?;
+
+        Ok(Gas { gas })
+    }
+
+    pub async fn self_update_gas(&mut self, gas: Gas) -> Result<Gas> {
+        let quota_limit = self.get_gas_limit().await?;
+        let gas = gas.gas;
+        if quota_limit == gas {
+            Err(anyhow!("reach quota_limit"))
+        } else {
+            let new_gas = quota_limit.min(gas / 2 * 3);
+            Ok(Gas { gas: new_gas })
         }
     }
 }
 
 #[axum::async_trait]
-impl AutoTx for EthAutoTx {
-    fn get_tag(&self) -> &AutoTxTag {
-        &self.tag
+impl AutoTx for EthClient {
+    async fn process_init_task(
+        &mut self,
+        init_task: &InitTask,
+        storage: &Storage,
+    ) -> Result<(Timeout, Gas)> {
+        // get timeout
+        let timeout = Timeout::Eth(EthTimeout {
+            nonce: U256::default(),
+        });
+        let from = init_task.send_data.account.address();
+        let timeout = self.try_update_timeout(from, timeout).await?;
+
+        // get Gas
+        let gas = self.estimate_gas(init_task.send_data.clone()).await?;
+
+        // store all
+        let request_key = &init_task.base_data.request_key;
+
+        storage.store_timeout(request_key, &timeout).await?;
+        storage.store_gas(request_key, &gas).await?;
+        storage.store_init_task(request_key, init_task).await?;
+
+        return Ok((timeout, gas));
     }
 
-    fn set_tag(&mut self, tag: AutoTxTag) {
-        self.tag = tag
-    }
+    async fn process_send_task(
+        &mut self,
+        send_task: &SendTask,
+        storage: &Storage,
+    ) -> Result<String> {
+        // get tx
+        let eth_tx = TransactionParameters::from(send_task);
 
-    fn get_key(&self) -> String {
-        self.auto_tx_info.req_key.clone()
-    }
+        // get signed
+        let account = send_task.send_data.account.clone();
+        let signed_tx = self.sign_transaction(eth_tx, account.clone()).await?;
 
-    fn get_current_hash(&self) -> String {
-        hex::encode(self.hash.transaction_hash)
-    }
+        // send
+        let request_key = &send_task.base_data.request_key;
+        match self.send_raw_transaction(signed_tx.raw_transaction).await {
+            Ok(hash) => {
+                let hash_to_check = hash.0.to_vec();
+                storage.store_status(request_key, &Status::Uncheck).await?;
+                storage
+                    .store_hash_to_check(
+                        request_key,
+                        &HashToCheck {
+                            hash: hash_to_check.clone(),
+                        },
+                    )
+                    .await?;
 
-    fn to_unified_type(&self) -> AutoTxType {
-        AutoTxType::Eth(self.clone())
-    }
+                let hash_str = hash_to_check.encode_hex::<String>();
+                info!(
+                    "unsend task: {} send success, hash: {}",
+                    request_key, hash_str
+                );
+                Ok(hash_str)
+            }
+            Err(e) => {
+                warn!(
+                    "unsend task: {} send failed: {}",
+                    request_key,
+                    e.to_string(),
+                );
+                let address = account.address();
+                let timeout = send_task.timeout;
+                let new_timeout = self.try_update_timeout(address, timeout).await?;
+                if timeout != new_timeout {
+                    storage.store_timeout(request_key, &new_timeout).await?;
+                    info!(
+                        "unsend task: {} update timeout, nonce: {}",
+                        request_key,
+                        timeout.get_eth_timeout().nonce
+                    );
+                }
 
-    async fn update_gas(&mut self, chains: &Chains, self_update: bool) -> Result<()> {
-        let chain_info = chains.get_chain(&self.auto_tx_info.chain_name).await?;
-        if let ChainClient::Eth(client) = chain_info.chain_client {
-            if self_update {
-                let gas_limit = client.get_gas_limit().await?;
-                let new_gas = gas_limit.min(self.tx.gas.unwrap() / 2 * 3);
-                self.tx.gas = Some(new_gas)
-            } else {
-                let call_req = CallRequest {
-                    from: Some(self.auto_tx_info.account.address()),
-                    to: self.tx.to,
-                    value: self.tx.value,
-                    data: self.tx.data.clone(),
-                    transaction_type: self.tx.transaction_type,
-                    ..Default::default()
-                };
-                let gas = client.web3.eth().estimate_gas(call_req, None).await?;
-                self.tx.gas = Some(gas / 2 * 3)
+                Err(e)
             }
         }
-
-        Ok(())
     }
 
-    async fn update_tx_if_timeout(&mut self, state: &AutoTxGlobalState) -> Result<bool> {
-        let chain_info = state
-            .chains
-            .get_chain(&self.auto_tx_info.chain_name)
-            .await?;
-        if let ChainClient::Eth(client) = chain_info.chain_client {
-            let current_nonce = self.tx.nonce;
-            let from = self.auto_tx_info.account.address();
-            let target_nonce = client.web3.eth().transaction_count(from, None).await?;
+    async fn process_check_task(
+        &mut self,
+        check_task: &CheckTask,
+        storage: &Storage,
+    ) -> Result<()> {
+        let request_key = &check_task.base_data.request_key;
+        let hash = &check_task.hash_to_check.hash;
+        let hash_str = hash.encode_hex::<String>();
+        match self.transaction_receipt(H256::from_slice(hash)).await {
+            Ok(result) => match result {
+                Some(receipt) => {
+                    let gas = storage.load_gas(request_key).await?;
+                    match (receipt.status, receipt.gas_used) {
+                        (Some(status), _) if status == U64::from(1) => {
+                            // success
+                            let contract_address = receipt.contract_address.map(|s| s.to_string());
+                            let auto_tx_result =
+                                AutoTxResult::success(hash_str.clone(), contract_address);
+                            storage.finalize_task(request_key, &auto_tx_result).await?;
+                            info!(
+                                "uncheck task: {} check success, hash: {}",
+                                request_key, hash_str
+                            );
 
-            // update if timeout
-            if current_nonce.is_none() || current_nonce.unwrap() < target_nonce {
-                // update nonce
-                self.tx.nonce = Some(target_nonce);
-                Ok(true)
-            } else {
-                Ok(false)
-            }
-        } else {
-            Err(anyhow!("wrong tx type"))
-        }
-    }
-
-    async fn update_current_hash(&mut self, chains: &Chains) -> Result<String> {
-        let chain_info = chains.get_chain(&self.auto_tx_info.chain_name).await?;
-        if let ChainClient::Eth(client) = chain_info.chain_client {
-            let tx_params = TransactionParameters {
-                nonce: self.tx.nonce,
-                to: self.tx.to,
-                gas: self.tx.gas.unwrap_or_default(),
-                value: self.tx.value.unwrap_or_default(),
-                data: self.tx.data.clone().unwrap_or_default(),
-                transaction_type: self.tx.transaction_type,
-                ..Default::default()
-            };
-
-            let signed_tx = client
-                .web3
-                .accounts()
-                .sign_transaction(tx_params, self.auto_tx_info.account.clone())
-                .await?;
-            self.hash = signed_tx.into();
-            Ok(self.get_current_hash())
-        } else {
-            Err(anyhow!("wrong tx type"))
-        }
-    }
-
-    async fn send(&mut self, state: Arc<AutoTxGlobalState>) -> Result<()> {
-        let res = state.chains.get_chain(&self.auto_tx_info.chain_name).await;
-        if let Ok(chain_info) = res {
-            if let ChainClient::Eth(client) = chain_info.chain_client {
-                match client
-                    .web3
-                    .eth()
-                    .send_raw_transaction(self.hash.raw_transaction.clone())
-                    .await
-                {
-                    Ok(hash_return) => {
-                        let hash = self.get_current_hash();
-                        assert_eq!(hex::encode(hash_return), hash);
-                        info!(
-                            "unsend task: {} send success, hash: {}",
-                            self.get_key(),
-                            hash
-                        );
-                        self.store_uncheck(&state.storage).await?
-                    }
-                    Err(e) => {
-                        if let Error::Rpc(e) = e.clone() {
-                            if e.message == "nonce too low"
-                                && client
-                                    .web3
-                                    .eth()
-                                    .transaction_receipt(self.hash.transaction_hash)
-                                    .await?
-                                    .is_some()
-                            {
-                                info!("unsend task: {} already success: {}", self.get_key(), e);
-                                self.store_uncheck(&state.storage).await?;
-                                return Ok(());
-                            }
+                            Ok(())
                         }
-                        info!("unsend task: {} send failed: {}", self.get_key(), e);
-                        if self.update_tx_if_timeout(&state).await? {
-                            self.update_current_hash(&state.chains).await?;
-                            self.store_unsend(&state.storage).await?;
+                        (Some(status), Some(used))
+                            if status == U64::from(0) && used.as_u64() == gas.gas =>
+                        {
+                            // self_update and resend
+                            match self.self_update_gas(gas).await {
+                                Ok(gas) => {
+                                    storage.store_gas(request_key, &gas).await?;
+                                    storage.downgrade_to_unsend(request_key).await?;
+                                    warn!(
+                                    "uncheck task: {} check failed: out of gas, hash: {}, self_update and resend, gas: {}",
+                                    request_key, hash_str, gas.gas
+                                );
+                                }
+                                Err(e) => {
+                                    if e.to_string().as_str() == "reach quota_limit" {
+                                        let auto_tx_result =
+                                            AutoTxResult::failed(Some(hash_str), e.to_string());
+                                        storage.finalize_task(request_key, &auto_tx_result).await?;
+                                        warn!(
+                                            "uncheck task: {} failed: reach quota_limit",
+                                            request_key,
+                                        );
+                                    }
+                                }
+                            }
+
+                            Err(anyhow!("Out of quota."))
+                        }
+                        _ => {
+                            // record failed
+                            let err_info = "execute failed".to_string();
+                            let auto_tx_result =
+                                AutoTxResult::failed(Some(hash_str.clone()), err_info.clone());
+                            storage.finalize_task(request_key, &auto_tx_result).await?;
+                            warn!(
+                                "uncheck task: {} failed: {}, hash: {}",
+                                request_key, err_info, hash_str,
+                            );
+
+                            Err(anyhow!(err_info.to_owned()))
                         }
                     }
                 }
-            }
-
-            Ok(())
-        } else {
-            Err(anyhow!("send failed: get_chain failed"))
-        }
-    }
-
-    async fn check(&mut self, state: Arc<AutoTxGlobalState>) -> Result<()> {
-        let res = state.chains.get_chain(&self.auto_tx_info.chain_name).await;
-        if let Ok(chain_info) = res {
-            if let ChainClient::Eth(client) = chain_info.chain_client {
-                match client
-                    .web3
-                    .eth()
-                    .transaction_receipt(self.hash.transaction_hash)
-                    .await
-                {
-                    Ok(result) => match result {
-                        Some(r) => {
-                            match (r.status, r.gas_used) {
-                                (Some(status), _) if status == U64::from(1) => {
-                                    // success
-                                    let hash = self.get_current_hash();
-                                    info!(
-                                        "uncheck task: {} check success, hash: {}",
-                                        self.get_key(),
-                                        hash
-                                    );
-                                    let contract_address =
-                                        r.contract_address.map(|s| s.to_string());
-                                    let result = AutoTxResult::success(hash, contract_address);
-                                    self.store_done(&state.storage, result).await?;
-                                }
-                                (Some(status), Some(used))
-                                    if status == U64::from(0) && used == self.tx.gas.unwrap() =>
-                                {
-                                    // self_update and resend
-                                    let hash = self.get_current_hash();
-                                    warn!(
-                                        "uncheck task: {} check failed: out of gas, hash: {}, self_update and resend",
-                                        self.get_key(),
-                                        hash
-                                    );
-                                    self.update_gas(&state.chains, true).await?;
-                                    // self.update_tx_if_timeout(&state).await?;
-                                    self.update_current_hash(&state.chains).await?;
-                                    self.store_unsend(&state.storage).await?;
-                                }
-                                _ => {
-                                    // record failed
-                                    let hash = self.get_current_hash();
-                                    warn!(
-                                        "uncheck task: {} check failed: Err: execute failed, hash: {}",
-                                        self.get_key(),
-                                        hash
-                                    );
-
-                                    let result =
-                                        AutoTxResult::failed(hash, "execute failed".to_string());
-                                    self.store_done(&state.storage, result).await?;
-                                }
-                            }
-                        }
-                        None => {
-                            // check if timeout
-                            info!("uncheck task: {} check failed: not found", self.get_key());
-                            if self.update_tx_if_timeout(&state).await? {
-                                self.update_current_hash(&state.chains).await?;
-                                self.store_unsend(&state.storage).await?;
-                            }
-                        }
-                    },
-                    Err(e) => {
-                        // check if timeout
+                None => {
+                    warn!("uncheck task: {} check failed: not found", request_key,);
+                    let address = storage.load_account(request_key).await?.address();
+                    let timeout = storage.load_timeout(request_key).await?;
+                    let new_timeout = self.try_update_timeout(address, timeout).await?;
+                    if timeout != new_timeout {
+                        storage.store_timeout(request_key, &new_timeout).await?;
                         info!(
-                            "uncheck task: {} transaction_receipt failed: {}",
-                            self.get_key(),
-                            e
+                            "uncheck task: {} update timeout, nonce: {}",
+                            request_key,
+                            timeout.get_eth_timeout().nonce
                         );
-                        if self.update_tx_if_timeout(&state).await? {
-                            self.update_current_hash(&state.chains).await?;
-                            self.store_unsend(&state.storage).await?;
-                        }
                     }
-                }
-            }
 
-            Ok(())
-        } else {
-            Err(anyhow!("check failed: get_chain failed"))
+                    Err(anyhow!("not found"))
+                }
+            },
+            Err(e) => {
+                warn!(
+                    "uncheck task: {} check failed: {}",
+                    request_key,
+                    e.to_string(),
+                );
+                Err(e)
+            }
         }
     }
 }

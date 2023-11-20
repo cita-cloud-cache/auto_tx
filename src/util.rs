@@ -1,10 +1,8 @@
 use anyhow::{anyhow, Context, Result};
 
-pub fn remove_0x(s: &str) -> String {
-    s.trim_matches('\"')
-        .strip_prefix("0x")
-        .unwrap_or(s)
-        .to_string()
+pub fn remove_quotes_and_0x(s: &str) -> String {
+    let new_s = s.trim_matches('\"');
+    new_s.strip_prefix("0x").unwrap_or(new_s).to_string()
 }
 
 pub fn add_0x(s: String) -> String {
@@ -12,7 +10,7 @@ pub fn add_0x(s: String) -> String {
 }
 
 pub fn parse_value(s: &str) -> Result<Vec<u8>> {
-    let s = remove_0x(s);
+    let s = remove_quotes_and_0x(s);
     if s.len() > 64 {
         return Err(anyhow!("can't parse value, the given str is too long"));
     }
@@ -22,7 +20,7 @@ pub fn parse_value(s: &str) -> Result<Vec<u8>> {
 }
 
 pub fn parse_data(s: &str) -> Result<Vec<u8>> {
-    hex::decode(remove_0x(s)).context("invalid hex input")
+    hex::decode(remove_quotes_and_0x(s)).context("invalid hex input")
 }
 
 pub fn display_value(s: &str) -> Option<String> {

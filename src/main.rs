@@ -31,9 +31,18 @@ mod send_tx;
 mod storage;
 mod util;
 
-use crate::{get_onchain_hash::get_onchain_hash, kms::set_kms, storage::AutoTxStorage};
+use crate::{
+    get_onchain_hash::get_onchain_hash,
+    kms::set_kms,
+    send_tx::{types::Status, AutoTx},
+};
 use anyhow::Result;
-use axum::{http::StatusCode, middleware, routing::any, Json, Router};
+use axum::{
+    http::StatusCode,
+    middleware,
+    routing::{any, get, post},
+    Json, Router,
+};
 use chains::Chains;
 use clap::Parser;
 use common_rs::{
@@ -101,6 +110,7 @@ pub struct AutoTxGlobalState {
     pub storage: Storage,
     pub max_timeout: u32,
     pub processing: Arc<RwLock<HashSet<String>>>,
+    pub fast_mode: bool,
 }
 
 impl AutoTxGlobalState {
@@ -113,6 +123,7 @@ impl AutoTxGlobalState {
             storage: Storage::new(config.datadir),
             max_timeout: config.max_timeout,
             processing: Arc::new(RwLock::new(HashSet::new())),
+            fast_mode: config.fast_mode,
         }
     }
 }
@@ -139,19 +150,11 @@ async fn run(opts: RunOpts) -> Result<()> {
         consul::service_register(consul_config).await?;
     }
 
-    // async fn log_req<B>(req: axum::http::Request<B>, next: middleware::Next<B>) -> impl IntoResponse
-    // where
-    //     B: std::fmt::Debug,
-    // {
-    //     info!("req: {:?}", req);
-    //     next.run(req).await
-    // }
-
     let state = Arc::new(AutoTxGlobalState::new(config));
 
     let app = Router::new()
-        .route("/api/:chain_name/send_tx", any(handle_send_tx))
-        .route("/api/get_onchain_hash", any(get_onchain_hash))
+        .route("/api/:chain_name/send_tx", post(handle_send_tx))
+        .route("/api/get_onchain_hash", get(get_onchain_hash))
         .route("/health", any(|| async { ok_no_data() }))
         // .route_layer(middleware::from_fn(log_req))
         .route_layer(middleware::from_fn(handle_http_error))
@@ -169,23 +172,60 @@ async fn run(opts: RunOpts) -> Result<()> {
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(tokio::time::Duration::from_secs(process_interval)).await;
-            match state.storage.get_all_processing().await {
-                Ok(auto_txs) => {
-                    for mut auto_tx in auto_txs {
+            match state.storage.get_processing_tasks().await {
+                Ok(processing) => {
+                    for (request_key, status) in processing {
                         let state = state.clone();
-                        let req_key = auto_tx.get_key();
                         let is_processing = {
                             let read = state.processing.read().await;
-                            read.contains(&req_key)
+                            read.contains(&request_key)
                         };
                         if !is_processing {
                             tokio::spawn(async move {
-                                let _ = auto_tx.process(state).await;
+                                let mut write = state.processing.write().await;
+                                write.insert(request_key.clone());
+                                match status {
+                                    Status::Unsend => {
+                                        let send_task = state
+                                            .storage
+                                            .load_send_task(&request_key)
+                                            .await
+                                            .unwrap();
+                                        let chain_name = send_task.base_data.chain_name.as_ref();
+                                        let mut client = state
+                                            .chains
+                                            .get_chain(chain_name)
+                                            .await
+                                            .unwrap()
+                                            .chain_client;
+                                        let _ = client
+                                            .process_send_task(&send_task, &state.storage)
+                                            .await;
+                                    }
+                                    Status::Uncheck => {
+                                        let check_task = state
+                                            .storage
+                                            .load_check_task(&request_key)
+                                            .await
+                                            .unwrap();
+                                        let chain_name = check_task.base_data.chain_name.as_ref();
+                                        let mut client = state
+                                            .chains
+                                            .get_chain(chain_name)
+                                            .await
+                                            .unwrap()
+                                            .chain_client;
+                                        let _ = client
+                                            .process_check_task(&check_task, &state.storage)
+                                            .await;
+                                    }
+                                }
+                                write.remove(&request_key);
                             });
                         }
                     }
                 }
-                Err(e) => warn!("get_all_processing failed: {}", e),
+                Err(e) => warn!("get_processing_tasks failed: {}", e),
             }
         }
     });
