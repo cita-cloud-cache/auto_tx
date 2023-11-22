@@ -1,5 +1,6 @@
-use crate::{AutoTxGlobalState, RequestParams};
-use axum::{extract::State, http::HeaderMap, response::IntoResponse, Json};
+use crate::AutoTxGlobalState;
+use anyhow::anyhow;
+use axum::{extract::State, http::HeaderMap, response::IntoResponse};
 use common_rs::restful::{ok, RESTfulError};
 use std::sync::Arc;
 
@@ -19,7 +20,11 @@ pub async fn get_onchain_hash(
 
     let request_key = user_code.to_string() + "-" + request_key;
 
-    let result = state.storage.load_auto_tx_result(&req_key).await?;
+    let result = state
+        .storage
+        .load_auto_tx_result(&request_key)
+        .await
+        .map_err(|_| anyhow!("load_auto_tx_result failed: not found"))?;
 
     ok(result.to_json())
 }

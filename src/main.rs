@@ -104,14 +104,41 @@ fn main() {
     }
 }
 
+struct ProcessingLock {
+    lock: RwLock<HashSet<String>>,
+}
+
+impl ProcessingLock {
+    fn new() -> Self {
+        Self {
+            lock: RwLock::new(HashSet::new()),
+        }
+    }
+
+    async fn is_processing(&self, request_key: &str) -> bool {
+        let read = self.lock.read().await;
+        read.contains(request_key)
+    }
+
+    async fn lock_task(&self, request_key: &str) {
+        let mut write = self.lock.write().await;
+        write.insert(request_key.to_owned());
+    }
+
+    async fn unlock_task(&self, request_key: &str) {
+        let mut write = self.lock.write().await;
+        write.remove(request_key);
+    }
+}
+
 #[derive(Clone)]
 pub struct AutoTxGlobalState {
-    pub chains: Chains,
-    pub storage: Storage,
-    pub max_timeout: u32,
-    pub cita_create_config: Option<CitaCreateConfig>,
-    pub processing: Arc<RwLock<HashSet<String>>>,
-    pub fast_mode: bool,
+    chains: Chains,
+    storage: Storage,
+    max_timeout: u32,
+    cita_create_config: Option<CitaCreateConfig>,
+    processing_lock: Arc<ProcessingLock>,
+    fast_mode: bool,
 }
 
 impl AutoTxGlobalState {
@@ -124,7 +151,7 @@ impl AutoTxGlobalState {
             storage: Storage::new(config.data_dir),
             max_timeout: config.max_timeout,
             cita_create_config: config.cita_create_config,
-            processing: Arc::new(RwLock::new(HashSet::new())),
+            processing_lock: Arc::new(ProcessingLock::new()),
             fast_mode: config.fast_mode,
         }
     }
@@ -143,6 +170,11 @@ async fn run(opts: RunOpts) -> Result<()> {
     cloud_util::tracer::init_tracer("auto_tx".to_string(), &config.log_config)
         .map_err(|e| println!("tracer init err: {e}"))
         .unwrap();
+
+    info!("fast_mode: {}", config.fast_mode);
+    info!("process_interval: {}", config.process_interval);
+    info!("max_timeout: {}", config.max_timeout);
+    info!("use kms: {}", config.kms_url);
 
     if let Some(config) = config.cita_create_config.as_ref() {
         info!("CitaCreateConfig exist: chain_name: {}", config.chain_name);
@@ -164,7 +196,6 @@ async fn run(opts: RunOpts) -> Result<()> {
         .route("/api/:chain_name/send_tx", post(handle_send_tx))
         .route("/api/get_onchain_hash", get(get_onchain_hash))
         .route("/health", any(|| async { ok_no_data() }))
-        // .route_layer(middleware::from_fn(log_req))
         .route_layer(middleware::from_fn(handle_http_error))
         .fallback(|| async {
             (
@@ -182,16 +213,13 @@ async fn run(opts: RunOpts) -> Result<()> {
             tokio::time::sleep(tokio::time::Duration::from_secs(process_interval)).await;
             match state.storage.get_processing_tasks().await {
                 Ok(processing) => {
-                    for (request_key, status) in processing {
+                    for request_key in processing {
                         let state = state.clone();
-                        let is_processing = {
-                            let read = state.processing.read().await;
-                            read.contains(&request_key)
-                        };
-                        if !is_processing {
+
+                        if !state.processing_lock.is_processing(&request_key).await {
                             tokio::spawn(async move {
-                                let mut write = state.processing.write().await;
-                                write.insert(request_key.clone());
+                                state.processing_lock.lock_task(&request_key).await;
+                                let status = state.storage.load_status(&request_key).await.unwrap();
                                 match status {
                                     Status::Unsend => {
                                         let send_task = state
@@ -228,7 +256,7 @@ async fn run(opts: RunOpts) -> Result<()> {
                                             .await;
                                     }
                                 }
-                                write.remove(&request_key);
+                                state.processing_lock.unlock_task(&request_key).await;
                             });
                         }
                     }

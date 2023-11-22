@@ -2,7 +2,7 @@ use super::{types::*, AutoTx};
 use crate::kms::Account;
 use crate::storage::Storage;
 use anyhow::{anyhow, Result};
-use ethabi::ethereum_types::{H160, H256, U64};
+use ethabi::ethereum_types::{H256, U64};
 use hex::ToHex;
 use web3::types::TransactionReceipt;
 use web3::{
@@ -17,12 +17,12 @@ const TRASNACTION_TYPE: u64 = 2;
 
 impl From<&SendTask> for TransactionParameters {
     fn from(value: &SendTask) -> Self {
-        let to = match value.send_data.tx_data.tx_type() {
-            TxType::Create => None,
-            TxType::Store | TxType::Normal => {
-                Some(Address::from_slice(&value.send_data.tx_data.to))
-            }
-        };
+        let to = value
+            .send_data
+            .tx_data
+            .to
+            .as_ref()
+            .map(|to| Address::from_slice(to));
         let gas = value.gas.gas;
         let nonce = value.timeout.get_eth_timeout().nonce;
         Self {
@@ -105,7 +105,7 @@ impl EthClient {
     pub async fn estimate_gas(&mut self, send_data: SendData) -> Result<Gas> {
         let call_request = CallRequest {
             from: Some(send_data.account.address()),
-            to: Some(H160::from_slice(&send_data.tx_data.to)),
+            to: send_data.tx_data.to.map(|to| Address::from_slice(&to)),
             value: Some(send_data.tx_data.value.1),
             data: Some(Bytes(send_data.tx_data.data.clone())),
             transaction_type: Some(TRASNACTION_TYPE.into()),
@@ -227,7 +227,8 @@ impl AutoTx for EthClient {
                     match (receipt.status, receipt.gas_used) {
                         (Some(status), _) if status == U64::from(1) => {
                             // success
-                            let contract_address = receipt.contract_address.map(|s| s.to_string());
+                            let contract_address =
+                                receipt.contract_address.map(|s| s.encode_hex::<String>());
                             let auto_tx_result =
                                 AutoTxResult::success(hash_str.clone(), contract_address);
                             storage.finalize_task(request_key, &auto_tx_result).await?;

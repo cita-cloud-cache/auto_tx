@@ -25,12 +25,11 @@ def send_transaction(target, chain_name, request_key, user_code, create):
     )
     try:
         response = requests.post(url, json=json_data, headers=headers)
-        response.raise_for_status()  # Raises HTTPError for bad responses
         data = response.json()
         if "data" not in data:
             return None, f"send failed, response: {data}"
         return data["data"]["hash"], None
-    except requests.exceptions.RequestException as e:
+    except Exception as e:
         return None, f"HTTP error occurred: {e}"
 
 
@@ -43,36 +42,36 @@ def get_onchain_hash(target, request_key, user_code):
     max_attempts = 100
     for _ in range(max_attempts):
         try:
-            time.sleep(1)
+            time.sleep(2)
             response = requests.get(url, headers=headers)
-            response.raise_for_status()
             data = response.json()
             if "data" in data:
                 return data["data"], None
             if "message" in data:
-                return None, data["message"]
-        except requests.exceptions.RequestException as e:
+                print(data["message"])
+        except Exception as e:
             return None, f"HTTP error occurred: {e}"
     return None, "Max attempts reached, transaction not found"
 
 
-target = "http://192.168.120.4/auto_tx"
-chain_name = "citacloud-shuwenlian"
+# target = "http://192.168.120.4/auto_tx"
+# chain_name = "citacloud-shuwenlian"
 
-# target = "http://127.0.0.1:3000/"
-# chain_name = "cita-test"
+target = "http://127.0.0.1:4000"
+chain_name = "eth-test"
 
 request_key = get_request_key()
 user_code = "did:bid:zf26MwL8MVDzjSQb6UMsam4r4pVqPzP93"
 
-hash, error = send_transaction(target, chain_name, request_key, user_code, False)
+hash, error = send_transaction(target, chain_name, request_key, user_code, True)
 if error:
-    print(error)
+    print(f'send_transaction failed: {error}')
+    exit(1)
 else:
     print(f"send success, hash: {hash}")
 
 result, error = get_onchain_hash(target, request_key, user_code)
 if error:
-    print(error)
+    print(f'get_onchain_hash failed: {error}')
 else:
-    print(f"result: {result}")
+    print(f"get_onchain_hash result: {result}")

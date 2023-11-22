@@ -5,7 +5,12 @@ pub mod eth;
 pub mod types;
 
 use crate::{
-    chains::*, kms::Account, storage::Storage, util::add_0x, AutoTxGlobalState, RequestParams,
+    chains::*,
+    config::CitaCreateConfig,
+    kms::{Account, Kms},
+    storage::Storage,
+    util::{add_0x, remove_quotes_and_0x},
+    AutoTxGlobalState, RequestParams,
 };
 use anyhow::Result;
 use axum::{
@@ -14,7 +19,7 @@ use axum::{
     response::IntoResponse,
     Json,
 };
-use common_rs::restful::{ok, RESTfulError};
+use common_rs::restful::{err, ok, RESTfulError};
 use serde_json::json;
 use std::sync::Arc;
 use types::*;
@@ -123,10 +128,48 @@ pub async fn handle(
         return Err(anyhow::anyhow!("field \"data\" missing").into());
     }
 
-    let request_key = params.user_code.clone() + "-" + req_key;
+    let request_key = user_code.to_string() + "-" + request_key;
 
     // get Chain
     let mut chain = state.chains.get_chain(&chain_name).await?;
+
+    // check if cita_create
+    if chain.chain_name
+        == state
+            .cita_create_config
+            .as_ref()
+            .unwrap_or(&CitaCreateConfig::default())
+            .chain_name
+        && params.to.is_empty()
+    {
+        info!("receive cita create request: request_key: {}", request_key);
+        let resp = cita_create::send_cita_create(
+            state.cita_create_config.as_ref().unwrap(),
+            &params.data,
+            &request_key,
+        )
+        .await?;
+        match resp.data {
+            Some(mut data) => {
+                if data.errMsg.is_empty() {
+                    data.contractAddress = remove_quotes_and_0x(&data.contractAddress);
+                    data.deployTxHash = remove_quotes_and_0x(&data.deployTxHash);
+                    let result = AutoTxResult::success(
+                        data.deployTxHash.clone(),
+                        Some(data.contractAddress),
+                    );
+                    state.storage.finalize_task(&request_key, &result).await?;
+                    info!("cita create request success: request_key: {}", request_key);
+                    return ok(json!({
+                        "hash": add_0x(data.deployTxHash),
+                    }));
+                } else {
+                    return Err(err(500, data.errMsg));
+                }
+            }
+            None => return Err(err(resp.code as u16, resp.msg)),
+        }
+    }
 
     // get timeout
     let timeout = {
@@ -138,11 +181,7 @@ pub async fn handle(
     };
 
     // get Account
-    let account = Account::new(
-        params.user_code.clone(),
-        chain.chain_info.crypto_type.clone(),
-    )
-    .await?;
+    let account = Account::new(user_code.to_string(), chain.chain_info.crypto_type.clone()).await?;
 
     // get TxData
     let tx_data = TxData::new(&params.to, &params.data, &params.value)?;
@@ -154,7 +193,7 @@ pub async fn handle(
             chain_name,
         },
         send_data: SendData {
-            account,
+            account: account.clone(),
             tx_data: tx_data.clone(),
         },
         timeout,
@@ -166,8 +205,8 @@ pub async fn handle(
 
     if state.fast_mode {
         info!(
-            "receive send_tx request: req_key: {}, user_code: {}\n\tchain: {}\n\ttx_data: {}\n\ttimeout: {}, gas: {}",
-            req_key, params.user_code, chain, tx_data, timeout, gas.gas
+            "receive send_tx request: request_key: {}, user_code: {}\n\tchain: {}\n\tfrom: {}, tx_data: {}\n\ttimeout: {}, gas: {}",
+            request_key, user_code, chain, account.address_str(), tx_data, timeout, gas.gas
         );
         return ok(json!({}));
     }
@@ -181,19 +220,18 @@ pub async fn handle(
     };
 
     let hash = {
-        let mut write = state.processing.write().await;
-        write.insert(request_key.clone());
+        state.processing_lock.lock_task(&request_key).await;
         let hash = chain
             .chain_client
             .process_send_task(&send_task, &state.storage)
             .await?;
-        write.remove(&request_key);
+        state.processing_lock.unlock_task(&request_key).await;
         hash
     };
 
     info!(
-        "receive send_tx request: req_key: {}, user_code: {}\n\tchain: {}\n\ttx_data: {}\n\ttimeout: {}, gas: {}\n\tinitial hash: 0x{}",
-        req_key, params.user_code, chain, tx_data, timeout, gas.gas, hash.clone()
+        "receive send_tx request: request_key: {}, user_code: {}\n\tchain: {}\n\tfrom: {}, tx_data: {}\n\ttimeout: {}, gas: {}\n\tinitial hash: 0x{}",
+        request_key, user_code, chain, account.address_str(), tx_data, timeout, gas.gas, hash.clone()
     );
 
     ok(json!({

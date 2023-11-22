@@ -143,14 +143,13 @@ impl Storage {
         Ok(())
     }
 
-    pub async fn get_processing_tasks(&self) -> Result<Vec<(String, Status)>> {
+    pub async fn get_processing_tasks(&self) -> Result<Vec<String>> {
         let entries = self.operator.list("processing/").await?;
         let mut result = vec![];
         for e in entries.into_iter() {
             if e.metadata().mode() == EntryMode::DIR {
                 let key = e.name().trim_end_matches('/').to_string();
-                let status = self.load_status(&key).await?;
-                result.push((key, status));
+                result.push(key);
             }
         }
 

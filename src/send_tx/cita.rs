@@ -18,7 +18,7 @@ impl From<&SendTask> for CitaTransaction {
         let nonce = value.base_data.request_key.clone();
         let valid_until_block = value.timeout.get_cita_timeout().valid_until_block;
         let gas = value.gas.gas;
-        let to_v1 = tx_data.to.clone();
+        let to_v1 = tx_data.to.clone().unwrap_or_default();
         let to = to_v1.encode_hex::<String>();
         Self {
             to,
@@ -39,8 +39,8 @@ pub struct CitaClient {
 }
 
 pub struct ReceiptInfo {
-    pub error_message: String,
-    pub contract_address: Vec<u8>,
+    pub error_message: Option<String>,
+    pub contract_address: Option<String>,
 }
 
 impl CitaClient {
@@ -138,11 +138,14 @@ impl CitaClient {
 
         match resp.is_ok() {
             true => {
-                let ResponseValue::Singe(ParamsValue::String(hash)) = resp.result().unwrap() else {
+                let ResponseValue::Map(map) = resp.result().unwrap() else {
                     unreachable!()
                 };
-                let hash = hex::decode(remove_quotes_and_0x(&hash))?;
-                Ok(hash)
+                let hash = remove_quotes_and_0x(
+                    &map.get("hash").map(|e| e.to_string()).unwrap_or_default(),
+                );
+                let hash_vec = hex::decode(hash)?;
+                Ok(hash_vec)
             }
             false => Err(anyhow!(format!(
                 "send_signed_transaction failed: {}",
@@ -156,32 +159,48 @@ impl CitaClient {
             .client
             .get_transaction_receipt(hash)
             .map_err(|_| anyhow!("get_transaction_receipt failed"))?;
-
         match resp.is_ok() {
             true => {
                 let ResponseValue::Map(map) = resp.result().unwrap() else {
                     unreachable!()
                 };
-                let error_message = remove_quotes_and_0x(
-                    &map.get("errorMessage")
-                        .map(|e| e.to_string())
-                        .unwrap_or_default(),
-                );
-                let contract_address = remove_quotes_and_0x(
-                    &map.get("contractAddress")
-                        .map(|e| e.to_string())
-                        .unwrap_or_default(),
-                );
-                let contract_address = hex::decode(contract_address)?;
+                let error_message = map
+                    .get("errorMessage")
+                    .ok_or(anyhow!("receipt no errorMessage"))
+                    .map(|v| {
+                        let s = remove_quotes_and_0x(&v.to_string());
+                        if &s == "null" {
+                            None
+                        } else {
+                            Some(s)
+                        }
+                    })?;
+                let contract_address = map
+                    .get("contractAddress")
+                    .ok_or(anyhow!("receipt no errorMessage"))
+                    .map(|v| {
+                        let s = remove_quotes_and_0x(&v.to_string());
+                        if &s == "null" {
+                            None
+                        } else {
+                            Some(s)
+                        }
+                    })?;
+
                 Ok(ReceiptInfo {
                     error_message,
                     contract_address,
                 })
             }
-            false => Err(anyhow!(format!(
-                "get_transaction_receipt failed: {}",
-                resp.error().unwrap().message()
-            ))),
+            false => match resp.error() {
+                Some(e) => Err(anyhow!(format!(
+                    "get_transaction_receipt failed: {}",
+                    e.message()
+                ))),
+                None => Err(anyhow!(format!(
+                    "get_transaction_receipt failed: not found",
+                ))),
+            },
         }
     }
 }
@@ -236,7 +255,7 @@ impl CitaClient {
             TxType::Store | TxType::Create => Ok(Gas { gas: 3_000_000 }),
             TxType::Normal => {
                 let quota_limit = self.get_gas_limit()?;
-                let to_vec = send_data.tx_data.to.clone();
+                let to_vec = send_data.tx_data.to.clone().unwrap_or_default();
                 let to = &add_0x(to_vec.encode_hex::<String>());
                 let from = add_0x(send_data.account.address().encode_hex::<String>());
                 let from = Some(from.as_str());
@@ -406,17 +425,12 @@ impl AutoTx for CitaClient {
         let hash = &check_task.hash_to_check.hash;
         let hash_str = hash.encode_hex::<String>();
         let request_key = &check_task.base_data.request_key;
-        match self.get_transaction_receipt(&hash_str) {
+        match self.get_transaction_receipt(&add_0x(hash_str.clone())) {
             Ok(receipt) => {
-                match receipt.error_message.as_str() {
-                    "" => {
+                match receipt.error_message {
+                    None => {
                         // success
                         let contract_address = receipt.contract_address;
-                        let contract_address = if contract_address == vec![0; 20] {
-                            None
-                        } else {
-                            Some(contract_address.encode_hex::<String>())
-                        };
                         let auto_tx_result =
                             AutoTxResult::success(hash_str.clone(), contract_address);
                         storage.finalize_task(request_key, &auto_tx_result).await?;
@@ -427,44 +441,50 @@ impl AutoTx for CitaClient {
 
                         Ok(())
                     }
-                    "Out of quota." => {
-                        // self_update and resend
-                        let gas = storage.load_gas(request_key).await?;
-                        match self.self_update_gas(gas).await {
-                            Ok(gas) => {
-                                storage.store_gas(request_key, &gas).await?;
-                                storage.downgrade_to_unsend(request_key).await?;
-                                warn!(
-                                "uncheck task: {} check failed: out of gas, hash: {}, self_update and resend, gas: {}",
-                                request_key, hash_str, gas.gas
-                            );
-                            }
-                            Err(e) => {
-                                if e.to_string().as_str() == "reach quota_limit" {
-                                    let auto_tx_result =
-                                        AutoTxResult::failed(Some(hash_str), e.to_string());
-                                    storage.finalize_task(request_key, &auto_tx_result).await?;
-                                    warn!(
-                                        "uncheck task: {} failed: reach quota_limit",
-                                        request_key,
+                    Some(error) => {
+                        match error.as_str() {
+                            "Out of quota." => {
+                                // self_update and resend
+                                let gas = storage.load_gas(request_key).await?;
+                                match self.self_update_gas(gas).await {
+                                    Ok(gas) => {
+                                        storage.store_gas(request_key, &gas).await?;
+                                        storage.downgrade_to_unsend(request_key).await?;
+                                        warn!(
+                                        "uncheck task: {} check failed: out of gas, hash: {}, self_update and resend, gas: {}",
+                                        request_key, hash_str, gas.gas
                                     );
+                                    }
+                                    Err(e) => {
+                                        if e.to_string().as_str() == "reach quota_limit" {
+                                            let auto_tx_result =
+                                                AutoTxResult::failed(Some(hash_str), e.to_string());
+                                            storage
+                                                .finalize_task(request_key, &auto_tx_result)
+                                                .await?;
+                                            warn!(
+                                                "uncheck task: {} failed: reach quota_limit",
+                                                request_key,
+                                            );
+                                        }
+                                    }
                                 }
+
+                                Err(anyhow!(error))
+                            }
+                            e => {
+                                // record fail
+                                let auto_tx_result =
+                                    AutoTxResult::failed(Some(hash_str.clone()), e.to_string());
+                                storage.finalize_task(request_key, &auto_tx_result).await?;
+                                warn!(
+                                    "uncheck task: {} failed: {}, hash: {}",
+                                    request_key, e, hash_str,
+                                );
+
+                                Err(anyhow!(error))
                             }
                         }
-
-                        Err(anyhow!(receipt.error_message))
-                    }
-                    e => {
-                        // record fail
-                        let auto_tx_result =
-                            AutoTxResult::failed(Some(hash_str.clone()), e.to_string());
-                        storage.finalize_task(request_key, &auto_tx_result).await?;
-                        warn!(
-                            "uncheck task: {} failed: {}, hash: {}",
-                            request_key, e, hash_str,
-                        );
-
-                        Err(anyhow!(e.to_owned()))
                     }
                 }
             }

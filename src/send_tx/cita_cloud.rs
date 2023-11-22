@@ -28,7 +28,7 @@ impl From<&SendTask> for CitaCloudlTransaction {
         let gas = value.gas.gas;
         Self {
             version: 0,
-            to: tx_data.to,
+            to: tx_data.to.unwrap_or_default(),
             nonce,
             quota: gas,
             valid_until_block,
@@ -176,7 +176,7 @@ impl CitaCloudClient {
                 let to = match t {
                     TxType::Create => vec![0u8; 20],
                     TxType::Store => unreachable!(),
-                    TxType::Normal => send_data.tx_data.to.clone(),
+                    TxType::Normal => send_data.tx_data.to.clone().unwrap_or_default(),
                 };
                 let call = CallRequest {
                     from: send_data.account.address(),
