@@ -11,21 +11,21 @@ appsecret = ""
 verify = ""
 dapp_name = ""
 
-[consul_config]
-consul_addr = "https://consul.rivtower.xyz"
-service_name = "auto_tx"
-service_id = "auto_tx_0"
-service_address = "127.0.0.1"
-service_port = 3000
-tags = [
-    "traefik.enable=true",
-    "traefik.http.routers.req_cache.middlewares=[\"cache-auto-tx-stripprefix\"]",
-    "traefik.http.middlewares.cache-auto-tx-stripprefix.stripprefix.prefixes=/auto_tx",
-]
-check_http_path = "/health"
-check_interval = "10s"
-check_timeout = "3s"
-check_deregister_critical_service_after = "1m"
+# [consul_config]
+# consul_addr = "https://consul.rivtower.xyz"
+# service_name = "auto_tx"
+# service_id = "auto_tx_0"
+# service_address = "127.0.0.1"
+# service_port = 3000
+# tags = [
+#     "traefik.enable=true",
+#     "traefik.http.routers.req_cache.middlewares=[\"cache-auto-tx-stripprefix\"]",
+#     "traefik.http.middlewares.cache-auto-tx-stripprefix.stripprefix.prefixes=/auto_tx",
+# ]
+# check_http_path = "/health"
+# check_interval = "10s"
+# check_timeout = "3s"
+# check_deregister_critical_service_after = "1m"
 
 [log_config]
 max_level = "info"

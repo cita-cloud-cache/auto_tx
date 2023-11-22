@@ -40,6 +40,8 @@ pub struct Config {
 
     pub log_config: LogConfig,
     pub process_interval: u64,
+
+    pub fast_mode: bool,
     pub max_timeout: u32,
     pub data_dir: String,
 
@@ -64,6 +66,8 @@ impl Default for Config {
             cita_create_config: None,
 
             consul_config: Default::default(),
+
+            fast_mode: false,
             consul_dir: "chain-cache/".to_string(),
         }
     }

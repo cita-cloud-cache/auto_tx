@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Result};
 use cita_tool::{Encryption, Hashable};
 use ethabi::ethereum_types::H256;
+use hex::ToHex;
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use web3::{
@@ -8,7 +9,7 @@ use web3::{
     types::Address,
 };
 
-use crate::util::parse_data;
+use crate::util::{add_0x, parse_data};
 
 static KMS: OnceCell<String> = OnceCell::new();
 
@@ -64,7 +65,7 @@ struct SignResponse {
 #[derive(Deserialize, Debug)]
 struct SignResponseData {
     signature: String,
-    public_key: String,
+    public_key: Option<String>,
 }
 
 async fn sign_message(user_code: &str, crypto_type: &str, message: &str) -> Result<Vec<u8>> {
@@ -102,7 +103,7 @@ async fn sign_message(user_code: &str, crypto_type: &str, message: &str) -> Resu
             };
         }
         "sm2" => {
-            let public_key = parse_data(&resp.data.public_key)?[1..].to_vec();
+            let public_key = parse_data(&resp.data.public_key.unwrap())?[1..].to_vec();
             sig_vec.extend(public_key);
         }
         _ => unreachable!(),
@@ -115,6 +116,7 @@ async fn sign_message(user_code: &str, crypto_type: &str, message: &str) -> Resu
 pub trait Kms {
     fn hash(&self, msg: &[u8]) -> Vec<u8>;
     fn address(&self) -> Vec<u8>;
+    fn address_str(&self) -> String;
     async fn sign(&self, msg: &str) -> Result<Vec<u8>>;
 }
 
@@ -148,6 +150,10 @@ impl Kms for Account {
 
     fn address(&self) -> Vec<u8> {
         self.address.clone()
+    }
+
+    fn address_str(&self) -> String {
+        add_0x(self.address.clone().encode_hex())
     }
 
     async fn sign(&self, msg: &str) -> Result<Vec<u8>> {

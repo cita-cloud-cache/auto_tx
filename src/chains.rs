@@ -53,16 +53,6 @@ impl Display for ChainInfo {
     }
 }
 
-impl ChainInfo {
-    pub fn new(chain_type: &str, crypto_type: &str, chain_url: &str) -> Self {
-        Self {
-            chain_type: chain_type.to_string(),
-            crypto_type: crypto_type.to_string(),
-            chain_url: chain_url.to_string(),
-        }
-    }
-}
-
 #[derive(Clone)]
 pub struct Chain {
     pub chain_name: String,
