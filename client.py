@@ -21,14 +21,20 @@ def send_transaction(target, chain_name, request_key, user_code, create):
         else {
             "to": "0x1879C8B68c50A4D4eeC9852325d32B60B43f3FbD",
             "data": "0xabcd1234",
+            "timeout": 60,
         }
     )
     try:
         response = requests.post(url, json=json_data, headers=headers)
-        data = response.json()
-        if "data" not in data:
-            return None, f"send failed, response: {data}"
-        return data["data"]["hash"], None
+        resp = response.json()
+        if "data" not in resp:
+            return None, f"send failed, resp: {resp}"
+        else:
+            data = resp["data"]
+            if "hash" not in data:
+                return None, None
+            else:
+                return data["hash"], None
     except Exception as e:
         return None, f"HTTP error occurred: {e}"
 
@@ -58,7 +64,7 @@ def get_onchain_hash(target, request_key, user_code):
 # chain_name = "citacloud-shuwenlian"
 
 target = "http://127.0.0.1:4000"
-chain_name = "eth-test"
+chain_name = "cita-cloud-test"
 
 request_key = get_request_key()
 user_code = "did:bid:zf26MwL8MVDzjSQb6UMsam4r4pVqPzP93"
@@ -68,7 +74,10 @@ if error:
     print(f'send_transaction failed: {error}')
     exit(1)
 else:
-    print(f"send success, hash: {hash}")
+    if hash:
+        print(f"send success, hash: {hash}")
+    else:
+        print(f"send success, fast_mode")
 
 result, error = get_onchain_hash(target, request_key, user_code)
 if error:
