@@ -32,32 +32,19 @@ mod storage;
 mod util;
 
 use crate::{
-    get_onchain_hash::get_onchain_hash,
+    get_onchain_hash::get_onchain_hash as get_onchain_hash_handler,
     kms::set_kms,
     send_tx::{types::Status, AutoTx},
 };
-use anyhow::Result;
-use axum::{
-    http::StatusCode,
-    middleware,
-    routing::{any, get, post},
-    Json, Router,
-};
 use chains::Chains;
 use clap::Parser;
-use common_rs::{
-    consul,
-    restful::{handle_http_error, ok_no_data, shutdown_signal},
-};
+use color_eyre::eyre::Result;
+use common_rs::{configure::file_config, consul, restful::http_serve};
 use config::{CitaCreateConfig, Config};
-use figment::{
-    providers::{Format, Toml},
-    Figment,
-};
+use salvo::prelude::*;
 use send_tx::handle_send_tx;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
-use std::{collections::HashSet, net::SocketAddr, sync::Arc};
+use std::{collections::HashSet, sync::Arc};
 use storage::Storage;
 use tokio::sync::RwLock;
 
@@ -161,9 +148,7 @@ impl AutoTxGlobalState {
 async fn run(opts: RunOpts) -> Result<()> {
     ::std::env::set_var("RUST_BACKTRACE", "full");
 
-    let config: Config = Figment::new()
-        .join(Toml::file(&opts.config_path))
-        .extract()?;
+    let config: Config = file_config(&opts.config_path)?;
     set_kms(config.kms_url.clone());
 
     // init tracer
@@ -182,7 +167,7 @@ async fn run(opts: RunOpts) -> Result<()> {
         info!("run without CitaCreateConfig")
     }
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], config.port));
+    let port = config.port;
 
     let process_interval = config.process_interval;
 
@@ -192,21 +177,10 @@ async fn run(opts: RunOpts) -> Result<()> {
 
     let state = Arc::new(AutoTxGlobalState::new(config));
 
-    let app = Router::new()
-        .route("/api/:chain_name/send_tx", post(handle_send_tx))
-        .route("/api/get_onchain_hash", get(get_onchain_hash))
-        .route("/health", any(|| async { ok_no_data() }))
-        .route_layer(middleware::from_fn(handle_http_error))
-        .fallback(|| async {
-            (
-                StatusCode::NOT_FOUND,
-                Json(json!({
-                    "code": 404,
-                    "message": "Not Found",
-                })),
-            )
-        })
-        .with_state(state.clone());
+    let router = Router::new()
+        .hoop(affix::inject(state.clone()))
+        .push(Router::with_path("/api/<chain_name>/send_tx").post(handle_send_tx))
+        .push(Router::with_path("/api/get_onchain_hash").get(get_onchain_hash_handler));
 
     tokio::spawn(async move {
         loop {
@@ -266,12 +240,9 @@ async fn run(opts: RunOpts) -> Result<()> {
         }
     });
 
-    info!("auto_tx listening on {}", addr);
-    axum::Server::bind(&addr)
-        .serve(app.into_make_service())
-        .with_graceful_shutdown(shutdown_signal())
-        .await
-        .map_err(|e| anyhow::anyhow!("axum serve failed: {e}"))
+    http_serve("auto_tx", port, router).await;
+
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize, Default, Deserialize)]

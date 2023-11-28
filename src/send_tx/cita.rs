@@ -2,13 +2,14 @@ use super::{types::*, AutoTx};
 use crate::kms::Kms;
 use crate::storage::Storage;
 use crate::util::{add_0x, remove_quotes_and_0x};
-use anyhow::{anyhow, Result};
 use cita_tool::{
     client::basic::{Client, ClientExt},
     Crypto, LowerHex, ParamsValue, ProtoMessage, ResponseValue, Transaction as CitaTransaction,
     UnverifiedTransaction,
 };
+use color_eyre::eyre::{eyre, Result};
 use hex::ToHex;
+use salvo::async_trait;
 
 const CITA_BLOCK_LIMIT: u64 = 88;
 
@@ -53,7 +54,7 @@ impl CitaClient {
         let resp = self
             .client
             .get_metadata("latest")
-            .map_err(|_| anyhow!("get_metadata failed"))?;
+            .map_err(|_| eyre!("get_metadata failed"))?;
 
         match resp.is_ok() {
             true => {
@@ -67,7 +68,7 @@ impl CitaClient {
                 let block_interval = block_interval_str.parse::<u64>()? / 1000;
                 Ok(block_interval)
             }
-            false => Err(anyhow!(format!(
+            false => Err(eyre!(format!(
                 "get_block_interval failed: {}",
                 resp.error().unwrap().message()
             ))),
@@ -84,7 +85,7 @@ impl CitaClient {
                 "latest",
                 false,
             )
-            .map_err(|_| anyhow!("get_gas_limit failed"))?;
+            .map_err(|_| eyre!("get_gas_limit failed"))?;
 
         match resp.is_ok() {
             true => {
@@ -95,7 +96,7 @@ impl CitaClient {
                 let gas_limit = u64::from_str_radix(&remove_quotes_and_0x(&gas_limit), 16)?;
                 Ok(gas_limit)
             }
-            false => Err(anyhow!(format!(
+            false => Err(eyre!(format!(
                 "get_gas_limit failed: {}",
                 resp.error().unwrap().message()
             ))),
@@ -112,7 +113,7 @@ impl CitaClient {
         let resp = self
             .client
             .estimate_quota(from, to, data, height)
-            .map_err(|_| anyhow!("estimate_quota failed"))?;
+            .map_err(|_| eyre!("estimate_quota failed"))?;
 
         match resp.is_ok() {
             true => {
@@ -123,7 +124,7 @@ impl CitaClient {
                 let quota = u64::from_str_radix(&remove_quotes_and_0x(&quota), 16)?;
                 Ok(quota)
             }
-            false => Err(anyhow!(format!(
+            false => Err(eyre!(format!(
                 "estimate_quota failed: {}",
                 resp.error().unwrap().message()
             ))),
@@ -134,7 +135,7 @@ impl CitaClient {
         let resp = self
             .client
             .send_signed_transaction(signed_tx)
-            .map_err(|_| anyhow!("send_signed_transaction failed"))?;
+            .map_err(|_| eyre!("send_signed_transaction failed"))?;
 
         match resp.is_ok() {
             true => {
@@ -147,7 +148,7 @@ impl CitaClient {
                 let hash_vec = hex::decode(hash)?;
                 Ok(hash_vec)
             }
-            false => Err(anyhow!(format!(
+            false => Err(eyre!(format!(
                 "send_signed_transaction failed: {}",
                 resp.error().unwrap().message()
             ))),
@@ -158,7 +159,7 @@ impl CitaClient {
         let resp = self
             .client
             .get_transaction_receipt(hash)
-            .map_err(|_| anyhow!("get_transaction_receipt failed"))?;
+            .map_err(|_| eyre!("get_transaction_receipt failed"))?;
         match resp.is_ok() {
             true => {
                 let ResponseValue::Map(map) = resp.result().unwrap() else {
@@ -166,7 +167,7 @@ impl CitaClient {
                 };
                 let error_message = map
                     .get("errorMessage")
-                    .ok_or(anyhow!("receipt no errorMessage"))
+                    .ok_or(eyre!("receipt no errorMessage"))
                     .map(|v| {
                         let s = remove_quotes_and_0x(&v.to_string());
                         if &s == "null" {
@@ -177,7 +178,7 @@ impl CitaClient {
                     })?;
                 let contract_address = map
                     .get("contractAddress")
-                    .ok_or(anyhow!("receipt no errorMessage"))
+                    .ok_or(eyre!("receipt no errorMessage"))
                     .map(|v| {
                         let s = remove_quotes_and_0x(&v.to_string());
                         if &s == "null" {
@@ -193,13 +194,11 @@ impl CitaClient {
                 })
             }
             false => match resp.error() {
-                Some(e) => Err(anyhow!(format!(
+                Some(e) => Err(eyre!(format!(
                     "get_transaction_receipt failed: {}",
                     e.message()
                 ))),
-                None => Err(anyhow!(format!(
-                    "get_transaction_receipt failed: not found",
-                ))),
+                None => Err(eyre!(format!("get_transaction_receipt failed: not found",))),
             },
         }
     }
@@ -214,7 +213,7 @@ impl CitaClient {
         let current_height = self
             .client
             .get_current_height()
-            .map_err(|_| anyhow!("update_args get_current_height failed"))?;
+            .map_err(|_| eyre!("update_args get_current_height failed"))?;
 
         // offset remain_time
         if current_height > timeout.valid_until_block && timeout.valid_until_block != 0 {
@@ -245,7 +244,7 @@ impl CitaClient {
 
                 Ok(Timeout::Cita(timeout))
             }
-            (true, false) => Err(anyhow!("timeout")),
+            (true, false) => Err(eyre!("timeout")),
             (false, _) => Ok(Timeout::Cita(timeout)),
         }
     }
@@ -273,7 +272,7 @@ impl CitaClient {
         let quota_limit = self.get_gas_limit()?;
         let gas = gas.gas;
         if quota_limit == gas {
-            Err(anyhow!("reach quota_limit"))
+            Err(eyre!("reach quota_limit"))
         } else {
             let new_gas = quota_limit.min(gas / 2 * 3);
             Ok(Gas { gas: new_gas })
@@ -281,7 +280,7 @@ impl CitaClient {
     }
 }
 
-#[axum::async_trait]
+#[async_trait]
 impl AutoTx for CitaClient {
     async fn process_init_task(
         &mut self,
@@ -320,7 +319,7 @@ impl AutoTx for CitaClient {
         let version = self
             .client
             .get_version()
-            .map_err(|_| anyhow!("process_send_task get_version failed"))?;
+            .map_err(|_| eyre!("process_send_task get_version failed"))?;
         match version {
             0 => {
                 // new to must be empty
@@ -328,7 +327,7 @@ impl AutoTx for CitaClient {
                 cita_tx.chain_id = self
                     .client
                     .get_chain_id()
-                    .map_err(|_| anyhow!("update_args get_chain_id failed"))?;
+                    .map_err(|_| eyre!("update_args get_chain_id failed"))?;
             }
             version if version < 3 => {
                 // old to must be empty
@@ -336,7 +335,7 @@ impl AutoTx for CitaClient {
                 cita_tx.chain_id_v1 = hex::decode(
                     self.client
                         .get_chain_id_v1()
-                        .map_err(|_| anyhow!("update_args get_chain_id_v1 failed"))?
+                        .map_err(|_| eyre!("update_args get_chain_id_v1 failed"))?
                         .completed_lower_hex(),
                 )?;
             }
@@ -470,7 +469,7 @@ impl AutoTx for CitaClient {
                                     }
                                 }
 
-                                Err(anyhow!(error))
+                                Err(eyre!(error))
                             }
                             e => {
                                 // record fail
@@ -482,7 +481,7 @@ impl AutoTx for CitaClient {
                                     request_key, e, hash_str,
                                 );
 
-                                Err(anyhow!(error))
+                                Err(eyre!(error))
                             }
                         }
                     }

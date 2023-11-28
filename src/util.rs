@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use color_eyre::eyre::{eyre, Context, Result};
 
 pub fn remove_quotes_and_0x(s: &str) -> String {
     let new_s = s.trim_matches('\"');
@@ -12,11 +12,11 @@ pub fn add_0x(s: String) -> String {
 pub fn parse_value(s: &str) -> Result<Vec<u8>> {
     let s = remove_quotes_and_0x(s);
     if s.len() > 64 {
-        return Err(anyhow!("can't parse value, the given str is too long"));
+        return Err(eyre!("can't parse value, the given str is too long"));
     }
     // padding 0 to 32 bytes
     let padded = format!("{s:0>64}");
-    hex::decode(padded).map_err(|e| anyhow!("invalid value: {e}"))
+    hex::decode(padded).map_err(|e| eyre!("invalid value: {e}"))
 }
 
 pub fn parse_data(s: &str) -> Result<Vec<u8>> {

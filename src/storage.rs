@@ -1,5 +1,5 @@
 use crate::{kms::Account, send_tx::types::*};
-use anyhow::{anyhow, Result};
+use color_eyre::eyre::{eyre, Result};
 use opendal::{services::Sled, EntryMode, Operator};
 use paste::paste;
 
@@ -28,7 +28,7 @@ macro_rules! store_and_load {
                     self.operator
                         .write(&path, data_vec)
                         .await
-                        .map_err(|e| anyhow!(e.to_string()))
+                        .map_err(|e| eyre!(e.to_string()))
                 }
 
                 pub($vis) async fn [<load_$var_name>](&self, request_key: &str) -> Result<$data_type> {
@@ -37,7 +37,7 @@ macro_rules! store_and_load {
                         .operator
                         .read(&path)
                         .await
-                        .map_err(|e| anyhow!(e.to_string()))?;
+                        .map_err(|e| eyre!(e.to_string()))?;
                     let data = bincode::deserialize::<$data_type>(&data_vec)?;
                     Ok(data)
                 }
@@ -48,7 +48,7 @@ macro_rules! store_and_load {
                     self.operator
                         .delete(&path)
                         .await
-                        .map_err(|e| anyhow!(e.to_string()))
+                        .map_err(|e| eyre!(e.to_string()))
                 }
             }
         }

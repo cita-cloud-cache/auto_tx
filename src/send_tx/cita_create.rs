@@ -1,5 +1,5 @@
 use crate::config::CitaCreateConfig;
-use anyhow::Result;
+use color_eyre::eyre::Result;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use serde::Deserialize;
 use std::time::{SystemTime, UNIX_EPOCH};

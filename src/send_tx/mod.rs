@@ -12,19 +12,14 @@ use crate::{
     util::{add_0x, remove_quotes_and_0x},
     AutoTxGlobalState, RequestParams,
 };
-use anyhow::Result;
-use axum::{
-    extract::{Path, State},
-    http::HeaderMap,
-    response::IntoResponse,
-    Json,
-};
+use color_eyre::eyre::{eyre, Result};
 use common_rs::restful::{err, ok, RESTfulError};
+use salvo::prelude::*;
 use serde_json::json;
 use std::sync::Arc;
 use types::*;
 
-#[axum::async_trait]
+#[async_trait]
 pub trait AutoTx {
     async fn process_init_task(
         &mut self,
@@ -42,7 +37,7 @@ pub trait AutoTx {
         -> Result<()>;
 }
 
-#[axum::async_trait]
+#[async_trait]
 impl AutoTx for ChainClient {
     async fn process_init_task(
         &mut self,
@@ -81,51 +76,48 @@ impl AutoTx for ChainClient {
     }
 }
 
-pub async fn handle_send_tx(
-    headers: HeaderMap,
-    Path(chain_name): Path<String>,
-    State(state): State<Arc<AutoTxGlobalState>>,
-    Json(params): Json<RequestParams>,
-) -> std::result::Result<impl IntoResponse, RESTfulError> {
+#[handler]
+pub async fn handle_send_tx(depot: &Depot, req: &mut Request) -> Result<impl Writer, RESTfulError> {
+    let headers = req.headers().clone();
     let request_key = headers
         .get("request_key")
         .ok_or_else(|| {
-            let e = anyhow::anyhow!("no request_key in header");
+            let e = eyre!("no request_key in header");
             warn!("request failed: {}", e);
             e
         })?
         .to_str()?;
     let user_code = headers
         .get("user_code")
-        .ok_or(anyhow::anyhow!("user_code missing"))?
+        .ok_or(eyre!("user_code missing"))?
         .to_str()?;
 
-    handle(
-        request_key,
-        user_code,
-        Path(chain_name),
-        State(state),
-        Json(params),
-    )
-    .await
-    .map_err(|e| {
-        warn!("request: {} failed: {:?}", request_key, e);
-        e
-    })
+    let state = depot
+        .obtain::<Arc<AutoTxGlobalState>>()
+        .map_err(|e| eyre!("get app_state failed: {e:?}"))?;
+
+    let chain_name = req.param::<String>("chain_name").unwrap();
+    let params = req.parse_body().await?;
+    handle(state, request_key, user_code, chain_name, params)
+        .await
+        .map_err(|e| {
+            warn!("request: {} failed: {:?}", request_key, e);
+            e
+        })
 }
 
 pub async fn handle(
+    state: &Arc<AutoTxGlobalState>,
     request_key: &str,
     user_code: &str,
-    Path(chain_name): Path<String>,
-    State(state): State<Arc<AutoTxGlobalState>>,
-    Json(params): Json<RequestParams>,
-) -> std::result::Result<impl IntoResponse, RESTfulError> {
+    chain_name: String,
+    params: RequestParams,
+) -> Result<impl Writer, RESTfulError> {
     debug!("params: {:?}", params);
 
     // check params
     if params.data.is_empty() {
-        return Err(anyhow::anyhow!("field \"data\" missing").into());
+        return Err(eyre!("field \"data\" missing").into());
     }
 
     let request_key = user_code.to_string() + "-" + request_key;
