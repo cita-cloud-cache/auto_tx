@@ -1,9 +1,10 @@
 use super::{types::*, AutoTx};
 use crate::kms::Account;
 use crate::storage::Storage;
-use anyhow::{anyhow, Result};
+use color_eyre::eyre::{eyre, Result};
 use ethabi::ethereum_types::{H256, U64};
 use hex::ToHex;
+use salvo::async_trait;
 use web3::types::TransactionReceipt;
 use web3::{
     signing::Key,
@@ -55,7 +56,7 @@ impl EthClient {
             .eth()
             .block(BlockId::Number(BlockNumber::Latest))
             .await?
-            .ok_or(anyhow!("get_gas_limit get block failed"))?
+            .ok_or(eyre!("get_gas_limit get block failed"))?
             .gas_limit
             / 2;
         Ok(gas_limit.as_u64())
@@ -120,7 +121,7 @@ impl EthClient {
         let quota_limit = self.get_gas_limit().await?;
         let gas = gas.gas;
         if quota_limit == gas {
-            Err(anyhow!("reach quota_limit"))
+            Err(eyre!("reach quota_limit"))
         } else {
             let new_gas = quota_limit.min(gas / 2 * 3);
             Ok(Gas { gas: new_gas })
@@ -128,7 +129,7 @@ impl EthClient {
     }
 }
 
-#[axum::async_trait]
+#[async_trait]
 impl AutoTx for EthClient {
     async fn process_init_task(
         &mut self,
@@ -265,7 +266,7 @@ impl AutoTx for EthClient {
                                 }
                             }
 
-                            Err(anyhow!("Out of quota."))
+                            Err(eyre!("Out of quota."))
                         }
                         _ => {
                             // record failed
@@ -278,7 +279,7 @@ impl AutoTx for EthClient {
                                 request_key, err_info, hash_str,
                             );
 
-                            Err(anyhow!(err_info.to_owned()))
+                            Err(eyre!(err_info.to_owned()))
                         }
                     }
                 }
@@ -296,7 +297,7 @@ impl AutoTx for EthClient {
                         );
                     }
 
-                    Err(anyhow!("not found"))
+                    Err(eyre!("not found"))
                 }
             },
             Err(e) => {

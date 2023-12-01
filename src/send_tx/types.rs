@@ -1,6 +1,6 @@
 use crate::{kms::Account, util::*};
-use anyhow::Result;
 use cita_tool::client::basic::STORE_ADDRESS;
+use color_eyre::eyre::Result;
 use ethabi::ethereum_types::U256;
 use hex::ToHex;
 use serde::{Deserialize, Serialize};

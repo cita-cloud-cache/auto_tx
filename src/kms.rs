@@ -1,8 +1,9 @@
-use anyhow::{anyhow, Result};
 use cita_tool::{Encryption, Hashable};
+use color_eyre::eyre::{eyre, Result};
 use ethabi::ethereum_types::H256;
 use hex::ToHex;
 use once_cell::sync::OnceCell;
+use salvo::async_trait;
 use serde::{Deserialize, Serialize};
 use web3::{
     signing::{Key, Signature, SigningError},
@@ -43,13 +44,13 @@ async fn get_user_address(user_code: &str, crypto_type: &str) -> Result<Vec<u8>>
         .json(&data)
         .send()
         .await
-        .map_err(|e| anyhow!("get_user_address failed: {e}"))?
+        .map_err(|e| eyre!("get_user_address failed: {e}"))?
         .json::<AddrResponse>()
         .await
-        .map_err(|e| anyhow!("get_user_address failed: {e}"))?;
+        .map_err(|e| eyre!("get_user_address failed: {e}"))?;
 
     if resp.code != 200 {
-        return Err(anyhow::anyhow!(resp.message));
+        return Err(eyre!(resp.message));
     }
 
     parse_data(&resp.data.address)
@@ -83,14 +84,14 @@ async fn sign_message(user_code: &str, crypto_type: &str, message: &str) -> Resu
         .json(&data)
         .send()
         .await
-        .map_err(|e| anyhow!("sign_message failed: {e}"))?
+        .map_err(|e| eyre!("sign_message failed: {e}"))?
         .json::<SignResponse>()
         .await
-        .map_err(|e| anyhow!("sign_message failed: {e}"))?;
+        .map_err(|e| eyre!("sign_message failed: {e}"))?;
     let sig = resp.data.signature;
 
     if resp.code != 200 {
-        return Err(anyhow::anyhow!(resp.message));
+        return Err(eyre!(resp.message));
     }
 
     let mut sig_vec = parse_data(&sig)?;
@@ -112,7 +113,7 @@ async fn sign_message(user_code: &str, crypto_type: &str, message: &str) -> Resu
     Ok(sig_vec)
 }
 
-#[axum::async_trait]
+#[async_trait]
 pub trait Kms {
     fn hash(&self, msg: &[u8]) -> Vec<u8>;
     fn address(&self) -> Vec<u8>;
@@ -138,7 +139,7 @@ impl Account {
     }
 }
 
-#[axum::async_trait]
+#[async_trait]
 impl Kms for Account {
     fn hash(&self, msg: &[u8]) -> Vec<u8> {
         match self.crypto_type.to_lowercase().as_str() {
@@ -161,17 +162,13 @@ impl Kms for Account {
     }
 }
 
-#[axum::async_trait]
+#[async_trait]
 impl Key for Account {
-    fn sign(
-        &self,
-        _message: &[u8],
-        _chain_id: Option<u64>,
-    ) -> std::result::Result<Signature, SigningError> {
+    fn sign(&self, _message: &[u8], _chain_id: Option<u64>) -> Result<Signature, SigningError> {
         unreachable!("only support EIP1559TX")
     }
 
-    async fn sign_message(&self, msg: &[u8]) -> std::result::Result<Signature, SigningError> {
+    async fn sign_message(&self, msg: &[u8]) -> Result<Signature, SigningError> {
         let sig_vec = sign_message(&self.user_code, &self.crypto_type, &hex::encode(msg))
             .await
             .map_err(|_| SigningError::InvalidMessage)?;

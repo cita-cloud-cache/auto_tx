@@ -1,7 +1,6 @@
 use super::{types::*, AutoTx};
 use crate::kms::{Account, Kms};
 use crate::storage::Storage;
-use anyhow::{anyhow, Result};
 use cita_cloud_proto::blockchain::{
     raw_transaction::Tx, RawTransaction, Transaction as CitaCloudlTransaction,
     UnverifiedTransaction, Witness,
@@ -16,9 +15,11 @@ use cita_cloud_proto::evm::rpc_service_client::RpcServiceClient as EvmRpcService
 use cita_cloud_proto::evm::{ByteQuota, Receipt};
 use cita_cloud_proto::executor::CallRequest;
 use cita_cloud_proto::retry::RetryClient;
+use color_eyre::eyre::{eyre, Result};
 use ethabi::ethereum_types::U256;
 use hex::ToHex;
 use prost::Message;
+use salvo::async_trait;
 
 impl From<&SendTask> for CitaCloudlTransaction {
     fn from(value: &SendTask) -> Self {
@@ -88,7 +89,7 @@ macro_rules! cita_cloud_method {
                     .$fn_name(arg)
                     .await
                     .map(|response| response.into_inner())
-                    .map_err(|e| anyhow!(format!("{} failed: {}", fn_name, e.message())))
+                    .map_err(|e| eyre!(format!("{} failed: {}", fn_name, e.message())))
             }
         }
     };
@@ -163,7 +164,7 @@ impl CitaCloudClient {
 
                 Ok(Timeout::Cita(timeout))
             }
-            (true, false) => Err(anyhow!("timeout")),
+            (true, false) => Err(eyre!("timeout")),
             (false, _) => Ok(Timeout::Cita(timeout)),
         }
     }
@@ -197,7 +198,7 @@ impl CitaCloudClient {
         let quota_limit = self.get_gas_limit().await?;
         let gas = gas.gas;
         if quota_limit == gas {
-            Err(anyhow!("reach quota_limit"))
+            Err(eyre!("reach quota_limit"))
         } else {
             let new_gas = quota_limit.min(gas / 2 * 3);
             Ok(Gas { gas: new_gas })
@@ -205,7 +206,7 @@ impl CitaCloudClient {
     }
 }
 
-#[axum::async_trait]
+#[async_trait]
 impl AutoTx for CitaCloudClient {
     async fn process_init_task(
         &mut self,
@@ -357,7 +358,7 @@ impl AutoTx for CitaCloudClient {
                         }
                     }
 
-                    Err(anyhow!(receipt.error_message))
+                    Err(eyre!(receipt.error_message))
                 }
                 e => {
                     // record fail
@@ -369,7 +370,7 @@ impl AutoTx for CitaCloudClient {
                         request_key, e, hash_str,
                     );
 
-                    Err(anyhow!(e.to_owned()))
+                    Err(eyre!(e.to_owned()))
                 }
             },
             Err(e) => {
