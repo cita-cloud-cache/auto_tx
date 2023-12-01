@@ -1,29 +1,34 @@
-use crate::{storage::AutoTxStorage, AutoTxGlobalState, RequestParams};
-use axum::{extract::State, http::HeaderMap, response::IntoResponse, Json};
+use crate::AutoTxGlobalState;
+
+use color_eyre::eyre::{eyre, Result};
 use common_rs::restful::{ok, RESTfulError};
+use salvo::prelude::*;
 use std::sync::Arc;
 
-pub async fn get_onchain_hash(
-    headers: HeaderMap,
-    State(state): State<Arc<AutoTxGlobalState>>,
-    Json(params): Json<RequestParams>,
-) -> std::result::Result<impl IntoResponse, RESTfulError> {
-    debug!("params: {:?}", params);
-
-    // get req_key
-    let req_key = headers
-        .get("key")
-        .ok_or(anyhow::anyhow!("no key in header"))?
+#[handler]
+pub async fn get_onchain_hash(depot: &Depot, req: &Request) -> Result<impl Writer, RESTfulError> {
+    let headers = req.headers();
+    // get request_key
+    let request_key = headers
+        .get("request_key")
+        .ok_or(eyre!("no request_key in header"))?
+        .to_str()?;
+    let user_code = headers
+        .get("user_code")
+        .ok_or(eyre!("user_code missing"))?
         .to_str()?;
 
-    // check params
-    if params.user_code.is_empty() {
-        return Err(anyhow::anyhow!("user_code missing").into());
-    }
+    let request_key = user_code.to_string() + "-" + request_key;
 
-    let req_key = params.user_code.clone() + "-" + req_key;
+    let state = depot
+        .obtain::<Arc<AutoTxGlobalState>>()
+        .map_err(|e| eyre!("get app_state failed: {e:?}"))?;
 
-    let result = state.storage.get_done(&req_key).await?;
+    let result = state
+        .storage
+        .load_auto_tx_result(&request_key)
+        .await
+        .map_err(|_| eyre!("load_auto_tx_result failed: not found"))?;
 
     ok(result.to_json())
 }

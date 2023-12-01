@@ -14,27 +14,39 @@ common-rs = { git = "https://github.com/cita-cloud-cache/common-rs", default-fea
     "config",
 ] }
 
-anyhow = "1.0"
-axum = "0.6"
+bincode = "1.3"
+cita-tool = "0.21"
 clap = { version = "4.4", features = ["derive"] }
-figment = { version = "0.10", features = ["toml"] }
+color-eyre = "0.6"
+ethabi = "18.0"
+hex = "0.4"
+md5 = "0.7"
 once_cell = "1.18"
+opendal = { version = "0.42", features = ["services-sled"] }
+paste = "1.0"
+prost = "0.12"
+reqwest = { version = "0.11", features = ["json"] }
+salvo = { version = "0.58", features = ["affix"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tokio = { version = "1.33", features = ["full"] }
+tokio = { version = "1.34", features = ["full"] }
 tracing = "0.1"
-hex = "0.4.3"
-reqwest = { version = "0.11", features = ["json"] }
-ethabi = "18.0.0"
-prost = "0.12"
 web3 = { git = "https://github.com/Jayanring/rust-web3" }
-opendal = { version = "0.41", features = ["services-sled"] }
-cita-tool = "0.21.2"
 
 [profile.release.package."*"]
-# Set the default for dependencies.
 debug = 0
 
 [profile.release]
-# Add debug info -- line tables only
 debug = 1
+
+[profile.dev.package.backtrace]
+opt-level = 3
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_copy_implementations = "warn"
+unused_crate_dependencies = "warn"
+unused_extern_crates = "warn"
+
+[lints.clippy]
+missing_const_for_fn = "warn"

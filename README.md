@@ -66,9 +66,9 @@ Options:
 ```
 curl -X POST "http://127.0.0.1:4000/api/$chain_name/send_tx" \
      -H "Content-Type: application/json" \
-     -H "key: $request_key" \
+     -H "request_key: $request_key" \
+     -H "user_code: $user_code" \
      -d '{
-          "user_code": "$user_code",
           "to": "0x1879C8B68c50A4D4eeC9852325d32B60B43f3FbD",
           "data": "0xabcd1234",
           "value": "0",
@@ -76,7 +76,7 @@ curl -X POST "http://127.0.0.1:4000/api/$chain_name/send_tx" \
          }'
 ```
 
-响应：
+* 响应：
 
 `hash`: 初始哈希值，在不重试的情况下为上链哈希
 
@@ -98,13 +98,12 @@ curl -X POST "http://127.0.0.1:4000/api/$chain_name/send_tx" \
 `user_code`: 指定发送交易的用户，以该标识从`kms`获取
 
 ```
-curl -X POST "http://127.0.0.1:4000/api/get_onchain_hash" \
-     -H "Content-Type: application/json" \
-     -H "key: $request_key" \
-     -d '{"user_code": "$user_code"}'
+curl -X GET "http://127.0.0.1:4000/api/get_onchain_hash" \
+     -H "request_key: $request_key" \
+     -H "user_code: $user_code" \
 ```
 
-成功时响应：
+* 成功时响应：
 
 `is_success`: 任务的执行状态，`true`表示执行成功，`false`表示失败
 
@@ -125,7 +124,7 @@ curl -X POST "http://127.0.0.1:4000/api/get_onchain_hash" \
 }
 ```
 
-失败时响应：
+* 失败时响应：
 
 `is_success`: 任务的执行状态，`true`表示执行成功，`false`表示失败
 
@@ -146,7 +145,7 @@ curl -X POST "http://127.0.0.1:4000/api/get_onchain_hash" \
 }
 ```
 
-无结果时响应：
+* 无结果时响应：
 
 
 ```

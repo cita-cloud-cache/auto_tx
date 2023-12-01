@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use crate::send_tx::{cita::CitaClient, cita_cloud::CitaCloudClient, eth::EthClient};
-use anyhow::{anyhow, Result};
+use color_eyre::eyre::{eyre, Result};
 use common_rs::consul;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt::Display, sync::Arc};
@@ -53,16 +53,6 @@ impl Display for ChainInfo {
     }
 }
 
-impl ChainInfo {
-    pub fn new(chain_type: &str, crypto_type: &str, chain_url: &str) -> Self {
-        Self {
-            chain_type: chain_type.to_string(),
-            crypto_type: crypto_type.to_string(),
-            chain_url: chain_url.to_string(),
-        }
-    }
-}
-
 #[derive(Clone)]
 pub struct Chain {
     pub chain_name: String,
@@ -89,14 +79,14 @@ impl Chain {
                 client
                     .get_gas_limit()
                     .await
-                    .map_err(|_| anyhow!("cita-cloud url check failed"))?;
+                    .map_err(|_| eyre!("cita-cloud url check failed"))?;
                 ChainClient::CitaCloud(client)
             }
             "cita" => {
                 let client = CitaClient::new(&chain_info.chain_url)?;
                 client
                     .get_gas_limit()
-                    .map_err(|_| anyhow!("cita url check failed"))?;
+                    .map_err(|_| eyre!("cita url check failed"))?;
                 ChainClient::Cita(client)
             }
             "eth" => {
@@ -104,7 +94,7 @@ impl Chain {
                 client
                     .get_gas_limit()
                     .await
-                    .map_err(|_| anyhow!("eth url check failed"))?;
+                    .map_err(|_| eyre!("eth url check failed"))?;
                 ChainClient::Eth(client)
             }
             s => unimplemented!("not support chain_type: {s}"),

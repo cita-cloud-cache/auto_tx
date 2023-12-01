@@ -1,6 +1,16 @@
 port = 3000
 kms_url = "http://api.rivtower.cc/rivtrust-kms"
 
+#[cita_create_config]
+#chain_name = ""
+#create_url = ""
+#accessid = ""
+#access_secret = ""
+#appid = ""
+#appsecret = ""
+#verify = ""
+#dapp_name = ""
+
 [consul_config]
 consul_addr = "https://consul.rivtower.xyz"
 service_name = "auto_tx"
