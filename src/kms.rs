@@ -52,13 +52,16 @@ async fn get_user_address(user_code: &str, crypto_type: &str) -> Result<Vec<u8>>
     debug!("get_user_address resp: {:?}", resp);
 
     if resp.code != 200 {
-        return Err(eyre!(resp.message));
+        return Err(eyre!("kms get_user_address failed: {}", resp.message));
     }
 
     if let Some(data) = resp.data {
         parse_data(&data.address)
     } else {
-        Err(eyre!("get_user_address failed: no data, {}", resp.message))
+        Err(eyre!(
+            "kms get_user_address failed: no data, {}",
+            resp.message
+        ))
     }
 }
 
@@ -98,13 +101,13 @@ async fn sign_message(user_code: &str, crypto_type: &str, message: &str) -> Resu
     debug!("sign_message resp: {:?}", resp);
 
     if resp.code != 200 {
-        return Err(eyre!(resp.message));
+        return Err(eyre!("kms sign_message failed: {}", resp.message));
     }
 
     let data = if let Some(data) = resp.data {
         data
     } else {
-        return Err(eyre!("sign_message failed: no data, {}", resp.message));
+        return Err(eyre!("kms sign_message failed: no data, {}", resp.message));
     };
 
     let sig = data.signature;
