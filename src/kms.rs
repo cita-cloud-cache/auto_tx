@@ -21,7 +21,7 @@ pub fn set_kms(s: String) {
 #[derive(Deserialize, Debug)]
 struct AddrResponse {
     code: i32,
-    data: AddrResponseData,
+    data: Option<AddrResponseData>,
     message: String,
 }
 
@@ -49,17 +49,23 @@ async fn get_user_address(user_code: &str, crypto_type: &str) -> Result<Vec<u8>>
         .await
         .map_err(|e| eyre!("get_user_address failed: {e}"))?;
 
+    debug!("get_user_address resp: {:?}", resp);
+
     if resp.code != 200 {
         return Err(eyre!(resp.message));
     }
 
-    parse_data(&resp.data.address)
+    if let Some(data) = resp.data {
+        parse_data(&data.address)
+    } else {
+        Err(eyre!("get_user_address failed: no data, {}", resp.message))
+    }
 }
 
 #[derive(Deserialize, Debug)]
 struct SignResponse {
     code: i32,
-    data: SignResponseData,
+    data: Option<SignResponseData>,
     message: String,
 }
 
@@ -88,11 +94,20 @@ async fn sign_message(user_code: &str, crypto_type: &str, message: &str) -> Resu
         .json::<SignResponse>()
         .await
         .map_err(|e| eyre!("sign_message failed: {e}"))?;
-    let sig = resp.data.signature;
+
+    debug!("sign_message resp: {:?}", resp);
 
     if resp.code != 200 {
         return Err(eyre!(resp.message));
     }
+
+    let data = if let Some(data) = resp.data {
+        data
+    } else {
+        return Err(eyre!("sign_message failed: no data, {}", resp.message));
+    };
+
+    let sig = data.signature;
 
     let mut sig_vec = parse_data(&sig)?;
     match crypto_type.to_lowercase().as_str() {
@@ -104,7 +119,7 @@ async fn sign_message(user_code: &str, crypto_type: &str, message: &str) -> Resu
             };
         }
         "sm2" => {
-            let public_key = parse_data(&resp.data.public_key.unwrap())?[1..].to_vec();
+            let public_key = parse_data(&data.public_key.unwrap())?[1..].to_vec();
             sig_vec.extend(public_key);
         }
         _ => unreachable!(),
