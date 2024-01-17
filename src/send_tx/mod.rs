@@ -113,7 +113,7 @@ pub async fn handle(
     chain_name: String,
     params: RequestParams,
 ) -> Result<impl Writer, RESTfulError> {
-    debug!("params: {:?}", params);
+    debug!("chain_name: {chain_name}, user_code: {user_code}, request_key: {request_key}, params: {params:?}");
 
     // check params
     if params.data.is_empty() {
