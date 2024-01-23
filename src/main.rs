@@ -148,7 +148,7 @@ impl AutoTxGlobalState {
 async fn run(opts: RunOpts) -> Result<()> {
     ::std::env::set_var("RUST_BACKTRACE", "full");
 
-    let mut config: Config = file_config(&opts.config_path)?;
+    let config: Config = file_config(&opts.config_path)?;
     set_kms(config.kms_url.clone());
 
     // init tracer
@@ -171,14 +171,10 @@ async fn run(opts: RunOpts) -> Result<()> {
 
     let process_interval = config.process_interval;
 
-    if let Some(consul_config) = &mut config.consul_config {
-        let pod_name = std::env::var("K8S_POD_NAME").unwrap_or_default();
-        let service_name = std::env::var("K8S_SERVICE_NAME").unwrap_or_default();
-        let namespace = std::env::var("K8S_NAMESPACE").unwrap_or_default();
-        consul_config.service_id = format!("{pod_name}-{namespace}");
-        consul_config.service_address =
-            format!("{pod_name}.{service_name}.{namespace}.svc.cluster.local");
-        consul::service_register(consul_config).await?;
+    if let Some(consul_config) = &config.consul_config {
+        consul::keep_service_register_in_k8s(consul_config)
+            .await
+            .ok();
     }
 
     let state = Arc::new(AutoTxGlobalState::new(config));
