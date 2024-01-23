@@ -176,8 +176,10 @@ async fn run(opts: RunOpts) -> Result<()> {
         let service_name = std::env::var("K8S_SERVICE_NAME").unwrap_or_default();
         let namespace = std::env::var("K8S_NAMESPACE").unwrap_or_default();
         consul_config.service_id = format!("{pod_name}-{namespace}");
-        consul_config.service_address =
-            format!("{pod_name}.{service_name}.{namespace}.svc.cluster.local");
+        consul_config.service_address = format!(
+            "{pod_name}.{service_name}.{namespace}.svc.cluster.local:{}",
+            config.port
+        );
         consul::service_register(consul_config).await?;
     }
 
