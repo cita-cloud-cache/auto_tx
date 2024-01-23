@@ -178,7 +178,7 @@ async fn run(opts: RunOpts) -> Result<()> {
         consul_config.service_id = format!("{pod_name}-{namespace}");
         consul_config.service_address =
             format!("{pod_name}.{service_name}.{namespace}.svc.cluster.local");
-        consul::put_service_register(consul_config).await?;
+        consul::service_register(consul_config).await?;
     }
 
     let state = Arc::new(AutoTxGlobalState::new(config));
