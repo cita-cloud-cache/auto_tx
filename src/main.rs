@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![forbid(unsafe_code)]
 #![warn(
     missing_copy_implementations,
     unused_crate_dependencies,
@@ -26,6 +25,7 @@ extern crate tracing;
 mod chains;
 mod config;
 mod get_onchain_hash;
+mod get_receipt;
 mod kms;
 mod send_tx;
 mod storage;
@@ -33,6 +33,7 @@ mod util;
 
 use crate::{
     get_onchain_hash::get_onchain_hash as get_onchain_hash_handler,
+    get_receipt::get_receipt as get_receipt_handler,
     kms::set_kms,
     send_tx::{types::Status, AutoTx},
 };
@@ -182,7 +183,8 @@ async fn run(opts: RunOpts) -> Result<()> {
     let router = Router::new()
         .hoop(affix::inject(state.clone()))
         .push(Router::with_path("/api/<chain_name>/send_tx").post(handle_send_tx))
-        .push(Router::with_path("/api/get_onchain_hash").get(get_onchain_hash_handler));
+        .push(Router::with_path("/api/get_onchain_hash").get(get_onchain_hash_handler))
+        .push(Router::with_path("/api/<chain_name>/get_receipt/<hash>").get(get_receipt_handler));
 
     tokio::spawn(async move {
         loop {

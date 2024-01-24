@@ -4,7 +4,6 @@ use crate::storage::Storage;
 use color_eyre::eyre::{eyre, Result};
 use ethabi::ethereum_types::{H256, U64};
 use hex::ToHex;
-use salvo::async_trait;
 use web3::types::TransactionReceipt;
 use web3::{
     signing::Key,
@@ -129,7 +128,6 @@ impl EthClient {
     }
 }
 
-#[async_trait]
 impl AutoTx for EthClient {
     async fn process_init_task(
         &mut self,
@@ -153,7 +151,7 @@ impl AutoTx for EthClient {
         storage.store_gas(request_key, &gas).await?;
         storage.store_init_task(request_key, init_task).await?;
 
-        return Ok((timeout, gas));
+        Ok((timeout, gas))
     }
 
     async fn process_send_task(
@@ -217,7 +215,7 @@ impl AutoTx for EthClient {
         &mut self,
         check_task: &CheckTask,
         storage: &Storage,
-    ) -> Result<()> {
+    ) -> Result<AutoTxResult> {
         let request_key = &check_task.base_data.request_key;
         let hash = &check_task.hash_to_check.hash;
         let hash_str = hash.encode_hex::<String>();
@@ -238,7 +236,7 @@ impl AutoTx for EthClient {
                                 request_key, hash_str
                             );
 
-                            Ok(())
+                            Ok(auto_tx_result)
                         }
                         (Some(status), Some(used))
                             if status == U64::from(0) && used.as_u64() == gas.gas =>
@@ -306,6 +304,44 @@ impl AutoTx for EthClient {
                     request_key,
                     e.to_string(),
                 );
+                Err(e)
+            }
+        }
+    }
+
+    async fn get_receipt(&mut self, hash: &str) -> Result<AutoTxResult> {
+        match self
+            .transaction_receipt(H256::from_slice(&hex::decode(hash)?))
+            .await
+        {
+            Ok(result) => match result {
+                Some(receipt) => {
+                    match (receipt.status, receipt.gas_used) {
+                        (Some(status), _) if status == U64::from(1) => {
+                            // success
+                            let contract_address =
+                                receipt.contract_address.map(|s| s.encode_hex::<String>());
+                            info!(
+                                "get receipt success, hash: {}, contract_address: {:?}",
+                                hash, contract_address
+                            );
+                            let auto_tx_result =
+                                AutoTxResult::success(hash.to_string(), contract_address);
+                            Ok(auto_tx_result)
+                        }
+                        _ => {
+                            // record failed
+                            let err_info = "execute failed".to_string();
+
+                            warn!("get receipt failed, hash: {}, error: {}", hash, err_info);
+                            Err(eyre!(err_info.to_owned()))
+                        }
+                    }
+                }
+                None => Err(eyre!("not found")),
+            },
+            Err(e) => {
+                warn!("get receipt failed, hash: {}, error: {}", hash, e);
                 Err(e)
             }
         }

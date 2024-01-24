@@ -19,7 +19,6 @@ use color_eyre::eyre::{eyre, Result};
 use ethabi::ethereum_types::U256;
 use hex::ToHex;
 use prost::Message;
-use salvo::async_trait;
 
 impl From<&SendTask> for CitaCloudlTransaction {
     fn from(value: &SendTask) -> Self {
@@ -206,7 +205,6 @@ impl CitaCloudClient {
     }
 }
 
-#[async_trait]
 impl AutoTx for CitaCloudClient {
     async fn process_init_task(
         &mut self,
@@ -230,7 +228,7 @@ impl AutoTx for CitaCloudClient {
         storage.store_gas(request_key, &gas).await?;
         storage.store_init_task(request_key, init_task).await?;
 
-        return Ok((timeout, gas));
+        Ok((timeout, gas))
     }
 
     async fn process_send_task(
@@ -313,7 +311,7 @@ impl AutoTx for CitaCloudClient {
         &mut self,
         check_task: &CheckTask,
         storage: &Storage,
-    ) -> Result<()> {
+    ) -> Result<AutoTxResult> {
         let hash = check_task.hash_to_check.hash.clone();
         let hash_str = hash.encode_hex::<String>();
         let request_key = &check_task.base_data.request_key;
@@ -334,7 +332,7 @@ impl AutoTx for CitaCloudClient {
                         request_key, hash_str
                     );
 
-                    Ok(())
+                    Ok(auto_tx_result)
                 }
                 "Out of quota." => {
                     // self_update and resend
@@ -408,6 +406,40 @@ impl AutoTx for CitaCloudClient {
                     }
                 }
 
+                Err(e)
+            }
+        }
+    }
+
+    async fn get_receipt(&mut self, hash: &str) -> Result<AutoTxResult> {
+        match self
+            .get_transaction_receipt(Hash {
+                hash: hex::decode(hash)?,
+            })
+            .await
+        {
+            Ok(receipt) => match receipt.error_message.as_str() {
+                "" => {
+                    let contract_address = if receipt.contract_address == vec![0; 20] {
+                        None
+                    } else {
+                        Some(receipt.contract_address.encode_hex::<String>())
+                    };
+                    info!(
+                        "get receipt success, hash: {}, contract_address: {:?}",
+                        hash, contract_address
+                    );
+                    let auto_tx_result = AutoTxResult::success(hash.to_string(), contract_address);
+
+                    Ok(auto_tx_result)
+                }
+                error => {
+                    warn!("get receipt failed, hash: {}, error: {}", hash, error);
+                    Err(eyre!(receipt.error_message))
+                }
+            },
+            Err(e) => {
+                warn!("get receipt failed, hash: {}, error: {}", hash, e);
                 Err(e)
             }
         }

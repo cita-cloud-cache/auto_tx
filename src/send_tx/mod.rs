@@ -19,7 +19,6 @@ use serde_json::json;
 use std::sync::Arc;
 use types::*;
 
-#[async_trait]
 pub trait AutoTx {
     async fn process_init_task(
         &mut self,
@@ -33,11 +32,15 @@ pub trait AutoTx {
         storage: &Storage,
     ) -> Result<String>;
 
-    async fn process_check_task(&mut self, check_task: &CheckTask, storage: &Storage)
-        -> Result<()>;
+    async fn process_check_task(
+        &mut self,
+        check_task: &CheckTask,
+        storage: &Storage,
+    ) -> Result<AutoTxResult>;
+
+    async fn get_receipt(&mut self, hash: &str) -> Result<AutoTxResult>;
 }
 
-#[async_trait]
 impl AutoTx for ChainClient {
     async fn process_init_task(
         &mut self,
@@ -67,11 +70,19 @@ impl AutoTx for ChainClient {
         &mut self,
         check_task: &CheckTask,
         storage: &Storage,
-    ) -> Result<()> {
+    ) -> Result<AutoTxResult> {
         match self {
             ChainClient::CitaCloud(client) => client.process_check_task(check_task, storage).await,
             ChainClient::Cita(client) => client.process_check_task(check_task, storage).await,
             ChainClient::Eth(client) => client.process_check_task(check_task, storage).await,
+        }
+    }
+
+    async fn get_receipt(&mut self, hash: &str) -> Result<AutoTxResult> {
+        match self {
+            ChainClient::CitaCloud(client) => client.get_receipt(hash).await,
+            ChainClient::Cita(client) => client.get_receipt(hash).await,
+            ChainClient::Eth(client) => client.get_receipt(hash).await,
         }
     }
 }

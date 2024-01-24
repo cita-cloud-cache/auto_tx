@@ -9,7 +9,6 @@ use cita_tool::{
 };
 use color_eyre::eyre::{eyre, Result};
 use hex::ToHex;
-use salvo::async_trait;
 
 const CITA_BLOCK_LIMIT: u64 = 88;
 
@@ -280,7 +279,6 @@ impl CitaClient {
     }
 }
 
-#[async_trait]
 impl AutoTx for CitaClient {
     async fn process_init_task(
         &mut self,
@@ -304,7 +302,7 @@ impl AutoTx for CitaClient {
         storage.store_gas(request_key, &gas).await?;
         storage.store_init_task(request_key, init_task).await?;
 
-        return Ok((timeout, gas));
+        Ok((timeout, gas))
     }
 
     async fn process_send_task(
@@ -420,7 +418,7 @@ impl AutoTx for CitaClient {
         &mut self,
         check_task: &CheckTask,
         storage: &Storage,
-    ) -> Result<()> {
+    ) -> Result<AutoTxResult> {
         let hash = &check_task.hash_to_check.hash;
         let hash_str = hash.encode_hex::<String>();
         let request_key = &check_task.base_data.request_key;
@@ -438,7 +436,7 @@ impl AutoTx for CitaClient {
                             request_key, hash_str
                         );
 
-                        Ok(())
+                        Ok(auto_tx_result)
                     }
                     Some(error) => {
                         match error.as_str() {
@@ -522,6 +520,31 @@ impl AutoTx for CitaClient {
                     }
                 }
 
+                Err(e)
+            }
+        }
+    }
+
+    async fn get_receipt(&mut self, hash: &str) -> Result<AutoTxResult> {
+        match self.get_transaction_receipt(hash) {
+            Ok(receipt) => match receipt.error_message {
+                None => {
+                    info!(
+                        "get receipt success, hash: {}, contract_address: {:?}",
+                        hash, receipt.contract_address
+                    );
+                    let auto_tx_result =
+                        AutoTxResult::success(hash.to_string(), receipt.contract_address);
+
+                    Ok(auto_tx_result)
+                }
+                Some(error) => {
+                    warn!("get receipt failed, hash: {}, error: {}", hash, error);
+                    Err(eyre!(error))
+                }
+            },
+            Err(e) => {
+                warn!("get receipt failed, hash: {}, error: {}", hash, e);
                 Err(e)
             }
         }
