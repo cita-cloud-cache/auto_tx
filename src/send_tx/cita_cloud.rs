@@ -168,11 +168,13 @@ impl CitaCloudClient {
         }
     }
 
-    pub async fn estimate_gas(&mut self, send_data: SendData) -> Result<Gas> {
+    pub async fn estimate_gas(&mut self, send_data: SendData) -> Gas {
         match send_data.tx_data.tx_type() {
-            TxType::Store => Ok(Gas { gas: 3_000_000 }),
+            TxType::Store => Gas {
+                gas: (send_data.tx_data.data.len() * 200) as u64,
+            },
             t => {
-                let quota_limit = self.get_gas_limit().await?;
+                let quota_limit = self.get_gas_limit().await.unwrap_or(1073741824);
                 let to = match t {
                     TxType::Create => vec![0u8; 20],
                     TxType::Store => unreachable!(),
@@ -185,10 +187,26 @@ impl CitaCloudClient {
                     args: Vec::new(),
                     height: 0,
                 };
-                let bytes_quota = self.estimate_quota(call).await?.bytes_quota;
-                let quota = U256::from_big_endian(bytes_quota.as_slice()).as_u64();
-                let gas = quota_limit.min(quota / 2 * 3);
-                Ok(Gas { gas })
+                let estimate_quota_timeout = tokio::time::timeout(
+                    std::time::Duration::from_secs(1),
+                    self.estimate_quota(call),
+                );
+                match estimate_quota_timeout.await {
+                    Ok(Ok(byte_quota)) => {
+                        let quota =
+                            U256::from_big_endian(byte_quota.bytes_quota.as_slice()).as_u64();
+                        let gas = quota_limit.min(quota / 2 * 3);
+                        Gas { gas }
+                    }
+                    Ok(Err(e)) => {
+                        warn!("estimate_quota failed: {}", e);
+                        Gas { gas: 10_000_000 }
+                    }
+                    Err(e) => {
+                        warn!("estimate_quota timeout: {}", e);
+                        Gas { gas: 10_000_000 }
+                    }
+                }
             }
         }
     }
@@ -219,7 +237,7 @@ impl AutoTx for CitaCloudClient {
         let timeout = self.try_update_timeout(timeout).await?;
 
         // get Gas
-        let gas = self.estimate_gas(init_task.send_data.clone()).await?;
+        let gas = self.estimate_gas(init_task.send_data.clone()).await;
 
         // store all
         let request_key = &init_task.base_data.request_key;
