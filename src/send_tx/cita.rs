@@ -1,4 +1,4 @@
-use super::{types::*, AutoTx};
+use super::{types::*, AutoTx, DEFAULT_QUOTA, DEFAULT_QUOTA_LIMIT};
 use crate::kms::Kms;
 use crate::storage::Storage;
 use crate::util::{add_0x, remove_quotes_and_0x};
@@ -248,11 +248,16 @@ impl CitaClient {
         }
     }
 
-    pub async fn estimate_gas(&mut self, send_data: SendData) -> Result<Gas> {
+    pub async fn estimate_gas(&mut self, send_data: SendData) -> Gas {
         match send_data.tx_data.tx_type() {
-            TxType::Store | TxType::Create => Ok(Gas { gas: 3_000_000 }),
+            TxType::Store => Gas {
+                // 200 gas per byte
+                // 1.5 times
+                gas: (send_data.tx_data.data.len() * 300) as u64,
+            },
+            TxType::Create => Gas { gas: DEFAULT_QUOTA },
             TxType::Normal => {
-                let quota_limit = self.get_gas_limit()?;
+                let quota_limit = self.get_gas_limit().unwrap_or(DEFAULT_QUOTA_LIMIT);
                 let to_vec = send_data.tx_data.to.clone().unwrap_or_default();
                 let to = &add_0x(to_vec.encode_hex::<String>());
                 let from = add_0x(send_data.account.address().encode_hex::<String>());
@@ -260,9 +265,11 @@ impl CitaClient {
                 let data = add_0x(send_data.tx_data.data.encode_hex::<String>());
                 let data = Some(data.as_str());
 
-                let quota = self.estimate_quota(from, to, data, "latest")?;
+                let quota = self
+                    .estimate_quota(from, to, data, "latest")
+                    .unwrap_or(DEFAULT_QUOTA);
                 let gas = quota_limit.min(quota / 2 * 3);
-                Ok(Gas { gas })
+                Gas { gas }
             }
         }
     }
@@ -293,7 +300,7 @@ impl AutoTx for CitaClient {
         let timeout = self.try_update_timeout(timeout).await?;
 
         // get Gas
-        let gas = self.estimate_gas(init_task.send_data.clone()).await?;
+        let gas = self.estimate_gas(init_task.send_data.clone()).await;
 
         // store all
         let request_key = &init_task.base_data.request_key;

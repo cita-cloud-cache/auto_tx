@@ -19,6 +19,9 @@ use serde_json::json;
 use std::sync::Arc;
 use types::*;
 
+pub const DEFAULT_QUOTA: u64 = 10_000_000;
+pub const DEFAULT_QUOTA_LIMIT: u64 = 1_073_741_824;
+
 pub trait AutoTx {
     async fn process_init_task(
         &mut self,

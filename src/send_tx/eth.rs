@@ -1,4 +1,4 @@
-use super::{types::*, AutoTx};
+use super::{types::*, AutoTx, DEFAULT_QUOTA};
 use crate::kms::Account;
 use crate::storage::Storage;
 use color_eyre::eyre::{eyre, Result};
@@ -102,7 +102,7 @@ impl EthClient {
         Ok(Timeout::Eth(timeout))
     }
 
-    pub async fn estimate_gas(&mut self, send_data: SendData) -> Result<Gas> {
+    pub async fn estimate_gas(&mut self, send_data: SendData) -> Gas {
         let call_request = CallRequest {
             from: Some(send_data.account.address()),
             to: send_data.tx_data.to.map(|to| Address::from_slice(&to)),
@@ -111,9 +111,12 @@ impl EthClient {
             transaction_type: Some(TRASNACTION_TYPE.into()),
             ..Default::default()
         };
-        let gas = self.web3_estimate_gas(call_request).await?;
+        let gas = self
+            .web3_estimate_gas(call_request)
+            .await
+            .unwrap_or(DEFAULT_QUOTA);
 
-        Ok(Gas { gas })
+        Gas { gas }
     }
 
     pub async fn self_update_gas(&mut self, gas: Gas) -> Result<Gas> {
@@ -142,7 +145,7 @@ impl AutoTx for EthClient {
         let timeout = self.try_update_timeout(from, timeout).await?;
 
         // get Gas
-        let gas = self.estimate_gas(init_task.send_data.clone()).await?;
+        let gas = self.estimate_gas(init_task.send_data.clone()).await;
 
         // store all
         let request_key = &init_task.base_data.request_key;

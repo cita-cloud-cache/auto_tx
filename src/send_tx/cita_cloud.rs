@@ -1,4 +1,4 @@
-use super::{types::*, AutoTx};
+use super::{types::*, AutoTx, DEFAULT_QUOTA, DEFAULT_QUOTA_LIMIT};
 use crate::kms::{Account, Kms};
 use crate::storage::Storage;
 use cita_cloud_proto::blockchain::{
@@ -171,10 +171,12 @@ impl CitaCloudClient {
     pub async fn estimate_gas(&mut self, send_data: SendData) -> Gas {
         match send_data.tx_data.tx_type() {
             TxType::Store => Gas {
-                gas: (send_data.tx_data.data.len() * 200) as u64,
+                // 200 gas per byte
+                // 1.5 times
+                gas: (send_data.tx_data.data.len() * 300) as u64,
             },
             t => {
-                let quota_limit = self.get_gas_limit().await.unwrap_or(1073741824);
+                let quota_limit = self.get_gas_limit().await.unwrap_or(DEFAULT_QUOTA_LIMIT);
                 let to = match t {
                     TxType::Create => vec![0u8; 20],
                     TxType::Store => unreachable!(),
@@ -200,11 +202,11 @@ impl CitaCloudClient {
                     }
                     Ok(Err(e)) => {
                         warn!("estimate_quota failed: {}", e);
-                        Gas { gas: 10_000_000 }
+                        Gas { gas: DEFAULT_QUOTA }
                     }
                     Err(e) => {
                         warn!("estimate_quota timeout: {}", e);
-                        Gas { gas: 10_000_000 }
+                        Gas { gas: DEFAULT_QUOTA }
                     }
                 }
             }
