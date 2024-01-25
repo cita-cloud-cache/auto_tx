@@ -173,6 +173,7 @@ impl CitaCloudClient {
             TxType::Store => Ok(Gas { gas: 3_000_000 }),
             t => {
                 let quota_limit = self.get_gas_limit().await?;
+                debug!("10");
                 let to = match t {
                     TxType::Create => vec![0u8; 20],
                     TxType::Store => unreachable!(),
@@ -219,8 +220,10 @@ impl AutoTx for CitaCloudClient {
         let timeout = self.try_update_timeout(timeout).await?;
 
         // get Gas
+        debug!("9");
         let gas = self.estimate_gas(init_task.send_data.clone()).await?;
 
+        debug!("11");
         // store all
         let request_key = &init_task.base_data.request_key;
 

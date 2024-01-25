@@ -125,7 +125,7 @@ pub async fn handle(
     params: RequestParams,
 ) -> Result<impl Writer, RESTfulError> {
     debug!("chain_name: {chain_name}, user_code: {user_code}, request_key: {request_key}, params: {params:?}");
-
+    debug!("1");
     // check params
     if params.data.is_empty() {
         return Err(eyre!("field \"data\" missing").into());
@@ -145,6 +145,7 @@ pub async fn handle(
             .chain_name
         && params.to.is_empty()
     {
+        debug!("2");
         info!("receive cita create request: request_key: {}", request_key);
         let resp = cita_create::send_cita_create(
             state.cita_create_config.as_ref().unwrap(),
@@ -201,16 +202,18 @@ pub async fn handle(
         },
         timeout,
     };
+    debug!("3");
     let (timeout, gas) = chain
         .chain_client
         .process_init_task(&init_task, &state.storage)
         .await?;
-
+    debug!("4");
     if state.fast_mode {
         info!(
             "receive send_tx request: request_key: {}, user_code: {}\n\tchain: {}\n\tfrom: {}, tx_data: {}\n\ttimeout: {}, gas: {}",
             request_key, user_code, chain, account.address_str(), tx_data, timeout, gas.gas
         );
+        debug!("5");
         return ok(json!({}));
     }
 
@@ -224,11 +227,14 @@ pub async fn handle(
 
     let hash = {
         state.processing_lock.lock_task(&request_key).await;
+        debug!("6");
         let hash = chain
             .chain_client
             .process_send_task(&send_task, &state.storage)
             .await?;
+        debug!("7");
         state.processing_lock.unlock_task(&request_key).await;
+        debug!("8");
         hash
     };
 
