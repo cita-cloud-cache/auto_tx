@@ -392,11 +392,13 @@ impl AutoTx for CitaCloudClient {
                 }
             },
             Err(e) => {
+                if !e.to_string().contains("Not get the receipt") {
+                    return Err(e);
+                }
                 let timeout = storage.load_timeout(request_key).await?;
                 warn!(
-                    "uncheck task: {} check failed: {}, remain_time: {}",
+                    "uncheck task: {} check failed: Not get the receipt, remain_time: {}",
                     request_key,
-                    e.to_string(),
                     timeout.get_cita_timeout().remain_time
                 );
                 match self.try_update_timeout(timeout).await {
