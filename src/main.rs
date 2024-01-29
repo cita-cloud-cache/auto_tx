@@ -229,9 +229,12 @@ async fn run(opts: RunOpts) -> Result<()> {
                                             .await
                                             .unwrap()
                                             .chain_client;
-                                        let _ = client
+                                        if let Err(e) = client
                                             .process_check_task(&check_task, &state.storage)
-                                            .await;
+                                            .await
+                                        {
+                                            warn!("process_check_task failed: {}", e);
+                                        }
                                     }
                                 }
                                 state.processing_lock.unlock_task(&request_key).await;
