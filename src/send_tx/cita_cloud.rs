@@ -335,8 +335,12 @@ impl AutoTx for CitaCloudClient {
         let hash = check_task.hash_to_check.hash.clone();
         let hash_str = hash.encode_hex::<String>();
         let request_key = &check_task.base_data.request_key;
-        match self.get_transaction_receipt(Hash { hash }).await {
-            Ok(receipt) => match receipt.error_message.as_str() {
+        let get_transaction_receipt_timeout = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            self.get_transaction_receipt(Hash { hash }),
+        );
+        match get_transaction_receipt_timeout.await {
+            Ok(Ok(receipt)) => match receipt.error_message.as_str() {
                 "" => {
                     // success
                     let contract_address = receipt.contract_address;
@@ -391,7 +395,7 @@ impl AutoTx for CitaCloudClient {
                     Err(eyre!(e.to_owned()))
                 }
             },
-            Err(e) => {
+            Ok(Err(e)) => {
                 if !e.to_string().contains("Not get the receipt") {
                     return Err(e);
                 }
@@ -430,6 +434,7 @@ impl AutoTx for CitaCloudClient {
 
                 Err(e)
             }
+            Err(e) => Err(eyre!("get_transaction_receipt rpc timeout: {}", e)),
         }
     }
 
