@@ -229,6 +229,10 @@ async fn run(opts: RunOpts) -> Result<()> {
                                             .await
                                             .unwrap()
                                             .chain_client;
+                                        debug!(
+                                            "checking task: {:?}",
+                                            &check_task.base_data.request_key
+                                        );
                                         if let Err(e) = client
                                             .process_check_task(&check_task, &state.storage)
                                             .await
