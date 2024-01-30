@@ -1,4 +1,4 @@
-use super::{types::*, AutoTx, DEFAULT_QUOTA, DEFAULT_QUOTA_LIMIT};
+use super::{types::*, AutoTx, DEFAULT_QUOTA, DEFAULT_QUOTA_LIMIT, RPC_TIMEOUT};
 use crate::kms::{Account, Kms};
 use crate::storage::Storage;
 use cita_cloud_proto::blockchain::{
@@ -190,7 +190,7 @@ impl CitaCloudClient {
                     height: 0,
                 };
                 let estimate_quota_timeout = tokio::time::timeout(
-                    std::time::Duration::from_secs(1),
+                    std::time::Duration::from_secs(RPC_TIMEOUT),
                     self.estimate_quota(call),
                 );
                 match estimate_quota_timeout.await {
@@ -336,7 +336,7 @@ impl AutoTx for CitaCloudClient {
         let hash_str = hash.encode_hex::<String>();
         let request_key = &check_task.base_data.request_key;
         let get_transaction_receipt_timeout = tokio::time::timeout(
-            std::time::Duration::from_secs(1),
+            std::time::Duration::from_secs(RPC_TIMEOUT),
             self.get_transaction_receipt(Hash { hash }),
         );
         match get_transaction_receipt_timeout.await {
@@ -434,7 +434,14 @@ impl AutoTx for CitaCloudClient {
 
                 Err(e)
             }
-            Err(e) => Err(eyre!("get_transaction_receipt rpc timeout: {}", e)),
+            Err(_) => {
+                warn!(
+                    "uncheck task: {} failed: get_transaction_receipt rpc timeout, hash: {}",
+                    request_key, hash_str,
+                );
+
+                Err(eyre!("get_transaction_receipt rpc timeout"))
+            }
         }
     }
 

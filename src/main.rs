@@ -230,15 +230,13 @@ async fn run(opts: RunOpts) -> Result<()> {
                                             .unwrap()
                                             .chain_client;
                                         debug!(
-                                            "checking task: {:?}",
+                                            "checking task: {}",
                                             &check_task.base_data.request_key
                                         );
-                                        if let Err(e) = client
+                                        client
                                             .process_check_task(&check_task, &state.storage)
                                             .await
-                                        {
-                                            warn!("process_check_task failed: {}", e);
-                                        }
+                                            .ok();
                                     }
                                 }
                                 state.processing_lock.unlock_task(&request_key).await;
