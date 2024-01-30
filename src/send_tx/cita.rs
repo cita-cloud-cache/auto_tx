@@ -1,4 +1,4 @@
-use super::{types::*, AutoTx, DEFAULT_QUOTA, DEFAULT_QUOTA_LIMIT};
+use super::{types::*, AutoTx, BASE_QUOTA, DEFAULT_QUOTA, DEFAULT_QUOTA_LIMIT};
 use crate::kms::Kms;
 use crate::storage::Storage;
 use crate::util::{add_0x, remove_quotes_and_0x};
@@ -253,7 +253,7 @@ impl CitaClient {
             TxType::Store => Gas {
                 // 200 gas per byte
                 // 1.5 times
-                gas: (send_data.tx_data.data.len() * 300) as u64,
+                gas: ((send_data.tx_data.data.len() * 200) as u64 + BASE_QUOTA) / 2 * 3,
             },
             TxType::Create => Gas { gas: DEFAULT_QUOTA },
             TxType::Normal => {

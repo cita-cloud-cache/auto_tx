@@ -1,4 +1,4 @@
-use super::{types::*, AutoTx, DEFAULT_QUOTA, DEFAULT_QUOTA_LIMIT, RPC_TIMEOUT};
+use super::{types::*, AutoTx, BASE_QUOTA, DEFAULT_QUOTA, DEFAULT_QUOTA_LIMIT, RPC_TIMEOUT};
 use crate::kms::{Account, Kms};
 use crate::storage::Storage;
 use cita_cloud_proto::blockchain::{
@@ -173,7 +173,7 @@ impl CitaCloudClient {
             TxType::Store => Gas {
                 // 200 gas per byte
                 // 1.5 times
-                gas: (send_data.tx_data.data.len() * 300) as u64,
+                gas: ((send_data.tx_data.data.len() * 200) as u64 + BASE_QUOTA) / 2 * 3,
             },
             t => {
                 let quota_limit = self.get_gas_limit().await.unwrap_or(DEFAULT_QUOTA_LIMIT);
