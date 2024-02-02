@@ -6,9 +6,9 @@ license = "Apache-2.0"
 edition = "2021"
 
 [dependencies]
-cloud-util = { package = "cloud-util", git = "https://github.com/cita-cloud/cloud-common-rs" }
-cita_cloud_proto = { package = "cita_cloud_proto", git = "https://github.com/cita-cloud/cloud-common-rs" }
-common-rs = { git = "https://github.com/cita-cloud-cache/common-rs", default-features = false, features = [
+cloud-util = { package = "cloud-util", git = "https://github.com/cita-cloud/cloud-common-rs", commit = "69ed713" }
+cita_cloud_proto = { package = "cita_cloud_proto", git = "https://github.com/cita-cloud/cloud-common-rs", commit = "69ed713" }
+common-rs = { git = "https://github.com/cita-cloud-cache/common-rs", commit = "a8233fe", default-features = false, features = [
     "restful",
     "consul",
     "config",
@@ -31,7 +31,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.35", features = ["full"] }
 tracing = "0.1"
-web3 = { git = "https://github.com/cita-cloud-cache/rust-web3" }
+web3 = { git = "https://github.com/cita-cloud-cache/rust-web3", commit = "a8233fe" }
 
 [profile.release.package."*"]
 debug = 0
