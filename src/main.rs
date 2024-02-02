@@ -229,9 +229,14 @@ async fn run(opts: RunOpts) -> Result<()> {
                                             .await
                                             .unwrap()
                                             .chain_client;
-                                        let _ = client
+                                        debug!(
+                                            "checking task: {}",
+                                            &check_task.base_data.request_key
+                                        );
+                                        client
                                             .process_check_task(&check_task, &state.storage)
-                                            .await;
+                                            .await
+                                            .ok();
                                     }
                                 }
                                 state.processing_lock.unlock_task(&request_key).await;
