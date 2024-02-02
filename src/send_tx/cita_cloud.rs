@@ -168,13 +168,13 @@ impl CitaCloudClient {
         }
     }
 
-    pub async fn estimate_gas(&mut self, send_data: SendData) -> Gas {
+    pub async fn estimate_gas(&mut self, send_data: SendData) -> Result<Gas> {
         match send_data.tx_data.tx_type() {
-            TxType::Store => Gas {
+            TxType::Store => Ok(Gas {
                 // 200 gas per byte
                 // 1.5 times
                 gas: ((send_data.tx_data.data.len() * 200) as u64 + BASE_QUOTA) / 2 * 3,
-            },
+            }),
             t => {
                 let quota_limit = self.get_gas_limit().await.unwrap_or(DEFAULT_QUOTA_LIMIT);
                 let to = match t {
@@ -198,15 +198,15 @@ impl CitaCloudClient {
                         let quota =
                             U256::from_big_endian(byte_quota.bytes_quota.as_slice()).as_u64();
                         let gas = quota_limit.min(quota / 2 * 3);
-                        Gas { gas }
+                        Ok(Gas { gas })
                     }
                     Ok(Err(e)) => {
                         warn!("estimate_quota failed: {}", e);
-                        Gas { gas: DEFAULT_QUOTA }
+                        Err(eyre!("estimate_quota failed: tx reverted"))
                     }
                     Err(e) => {
                         warn!("estimate_quota timeout: {}", e);
-                        Gas { gas: DEFAULT_QUOTA }
+                        Ok(Gas { gas: DEFAULT_QUOTA })
                     }
                 }
             }
@@ -239,7 +239,7 @@ impl AutoTx for CitaCloudClient {
         let timeout = self.try_update_timeout(timeout).await?;
 
         // get Gas
-        let gas = self.estimate_gas(init_task.send_data.clone()).await;
+        let gas = self.estimate_gas(init_task.send_data.clone()).await?;
 
         // store all
         let request_key = &init_task.base_data.request_key;
