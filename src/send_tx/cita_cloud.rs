@@ -16,6 +16,7 @@ use cita_cloud_proto::evm::{ByteQuota, Receipt};
 use cita_cloud_proto::executor::CallRequest;
 use cita_cloud_proto::retry::RetryClient;
 use color_eyre::eyre::{eyre, Result};
+use common_rs::error::CALError;
 use ethabi::ethereum_types::U256;
 use hex::ToHex;
 use prost::Message;
@@ -88,7 +89,7 @@ macro_rules! cita_cloud_method {
                     .$fn_name(arg)
                     .await
                     .map(|response| response.into_inner())
-                    .map_err(|e| eyre!(format!("{} failed: {}", fn_name, e.message())))
+                    .map_err(|e| eyre!("{} failed: {}", fn_name, e.message()))
             }
         }
     };
@@ -163,18 +164,18 @@ impl CitaCloudClient {
 
                 Ok(Timeout::Cita(timeout))
             }
-            (true, false) => Err(eyre!("timeout")),
+            (true, false) => Err(CALError::TransactionTimeout.into()),
             (false, _) => Ok(Timeout::Cita(timeout)),
         }
     }
 
-    pub async fn estimate_gas(&mut self, send_data: SendData) -> Result<Gas> {
+    pub async fn estimate_gas(&mut self, send_data: SendData) -> Gas {
         match send_data.tx_data.tx_type() {
-            TxType::Store => Ok(Gas {
+            TxType::Store => Gas {
                 // 200 gas per byte
                 // 1.5 times
                 gas: ((send_data.tx_data.data.len() * 200) as u64 + BASE_QUOTA) / 2 * 3,
-            }),
+            },
             t => {
                 let quota_limit = self.get_gas_limit().await.unwrap_or(DEFAULT_QUOTA_LIMIT);
                 let to = match t {
@@ -198,15 +199,15 @@ impl CitaCloudClient {
                         let quota =
                             U256::from_big_endian(byte_quota.bytes_quota.as_slice()).as_u64();
                         let gas = quota_limit.min(quota / 2 * 3);
-                        Ok(Gas { gas })
+                        Gas { gas }
                     }
                     Ok(Err(e)) => {
                         warn!("estimate_quota failed: {}", e);
-                        Err(eyre!("estimate_quota failed: tx reverted"))
+                        Gas { gas: DEFAULT_QUOTA }
                     }
                     Err(e) => {
                         warn!("estimate_quota timeout: {}", e);
-                        Ok(Gas { gas: DEFAULT_QUOTA })
+                        Gas { gas: DEFAULT_QUOTA }
                     }
                 }
             }
@@ -239,7 +240,7 @@ impl AutoTx for CitaCloudClient {
         let timeout = self.try_update_timeout(timeout).await?;
 
         // get Gas
-        let gas = self.estimate_gas(init_task.send_data.clone()).await?;
+        let gas = self.estimate_gas(init_task.send_data.clone()).await;
 
         // store all
         let request_key = &init_task.base_data.request_key;

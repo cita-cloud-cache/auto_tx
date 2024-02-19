@@ -13,7 +13,10 @@ use crate::{
     AutoTxGlobalState, RequestParams,
 };
 use color_eyre::eyre::{eyre, Result};
-use common_rs::restful::{err, ok, RESTfulError};
+use common_rs::{
+    error::CALError,
+    restful::{err, ok, RESTfulError},
+};
 use salvo::prelude::*;
 use serde_json::json;
 use std::sync::Arc;
@@ -95,24 +98,26 @@ impl AutoTx for ChainClient {
 #[handler]
 pub async fn handle_send_tx(depot: &Depot, req: &mut Request) -> Result<impl Writer, RESTfulError> {
     let headers = req.headers().clone();
-    let request_key = headers
-        .get("request_key")
-        .ok_or_else(|| {
-            let e = eyre!("no request_key in header");
-            warn!("request failed: {}", e);
-            e
-        })?
-        .to_str()?;
-    let user_code = headers
-        .get("user_code")
-        .ok_or(eyre!("user_code missing"))?
-        .to_str()?;
+    let request_key = if let Some(request_key) = headers.get("request_key") {
+        request_key.to_str()?
+    } else {
+        return err(CALError::BadRequest, "request_key missing");
+    };
+    let user_code = if let Some(user_code) = headers.get("user_code") {
+        user_code.to_str()?
+    } else {
+        return err(CALError::BadRequest, "user_code missing");
+    };
+    let chain_name = if let Some(chain_name) = req.param::<String>("chain_name") {
+        chain_name
+    } else {
+        return err(CALError::BadRequest, "chain_name missing");
+    };
 
     let state = depot
         .obtain::<Arc<AutoTxGlobalState>>()
         .map_err(|e| eyre!("get app_state failed: {e:?}"))?;
 
-    let chain_name = req.param::<String>("chain_name").unwrap();
     let params = req.parse_body().await?;
     handle(state, request_key, user_code, chain_name, params)
         .await
@@ -133,7 +138,7 @@ pub async fn handle(
 
     // check params
     if params.data.is_empty() {
-        return Err(eyre!("field \"data\" missing").into());
+        return err(CALError::BadRequest, "field \"data\" missing");
     }
 
     let request_key = user_code.to_string() + "-" + request_key;
@@ -171,11 +176,15 @@ pub async fn handle(
                     return ok(json!({
                         "hash": add_0x(data.deployTxHash),
                     }));
-                } else {
-                    return Err(err(500, data.errMsg));
                 }
+                return err(CALError::CitaCMCCreateFailed, &data.errMsg);
             }
-            None => return Err(err(resp.code as u16, resp.msg)),
+            None => {
+                return err(
+                    CALError::CitaCMCCreateFailed,
+                    &format!("{}, {}", resp.code, resp.msg),
+                )
+            }
         }
     }
 

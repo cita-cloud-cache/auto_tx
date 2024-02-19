@@ -44,22 +44,27 @@ async fn get_user_address(user_code: &str, crypto_type: &str) -> Result<Vec<u8>>
         .json(&data)
         .send()
         .await
-        .map_err(|e| eyre!("get_user_address failed: {e}"))?
+        .map_err(|e| eyre!("get_user_address err: {e}"))?
         .json::<AddrResponse>()
         .await
-        .map_err(|e| eyre!("get_user_address failed: {e}"))?;
+        .map_err(|e| eyre!("get_user_address err: {e}"))?;
 
     debug!("get_user_address resp: {:?}", resp);
 
     if resp.code != 200 {
-        return Err(eyre!("kms get_user_address failed: {}", resp.message));
+        return Err(eyre!(
+            "kms get_user_address failed: {}, {}",
+            resp.code,
+            resp.message
+        ));
     }
 
     if let Some(data) = resp.data {
         parse_data(&data.address)
     } else {
         Err(eyre!(
-            "kms get_user_address failed: no data, {}",
+            "kms get_user_address failed: no data, {}, {}",
+            resp.code,
             resp.message
         ))
     }
@@ -93,21 +98,29 @@ async fn sign_message(user_code: &str, crypto_type: &str, message: &str) -> Resu
         .json(&data)
         .send()
         .await
-        .map_err(|e| eyre!("sign_message failed: {e}"))?
+        .map_err(|e| eyre!("sign_message err: {e}"))?
         .json::<SignResponse>()
         .await
-        .map_err(|e| eyre!("sign_message failed: {e}"))?;
+        .map_err(|e| eyre!("sign_message err: {e}"))?;
 
     debug!("sign_message resp: {:?}", resp);
 
     if resp.code != 200 {
-        return Err(eyre!("kms sign_message failed: {}", resp.message));
+        return Err(eyre!(
+            "kms sign_message failed: {},{}",
+            resp.code,
+            resp.message
+        ));
     }
 
     let data = if let Some(data) = resp.data {
         data
     } else {
-        return Err(eyre!("kms sign_message failed: no data, {}", resp.message));
+        return Err(eyre!(
+            "kms sign_message failed: no data, {},{}",
+            resp.code,
+            resp.message
+        ));
     };
 
     let sig = data.signature;
@@ -131,7 +144,6 @@ async fn sign_message(user_code: &str, crypto_type: &str, message: &str) -> Resu
     Ok(sig_vec)
 }
 
-#[async_trait]
 pub trait Kms {
     fn hash(&self, msg: &[u8]) -> Vec<u8>;
     fn address(&self) -> Vec<u8>;
@@ -157,7 +169,6 @@ impl Account {
     }
 }
 
-#[async_trait]
 impl Kms for Account {
     fn hash(&self, msg: &[u8]) -> Vec<u8> {
         match self.crypto_type.to_lowercase().as_str() {
