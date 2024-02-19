@@ -67,10 +67,10 @@ impl CitaClient {
                 let block_interval = block_interval_str.parse::<u64>()? / 1000;
                 Ok(block_interval)
             }
-            false => Err(eyre!(format!(
+            false => Err(eyre!(
                 "get_block_interval failed: {}",
                 resp.error().unwrap().message()
-            ))),
+            )),
         }
     }
 
@@ -95,10 +95,10 @@ impl CitaClient {
                 let gas_limit = u64::from_str_radix(&remove_quotes_and_0x(&gas_limit), 16)?;
                 Ok(gas_limit)
             }
-            false => Err(eyre!(format!(
+            false => Err(eyre!(
                 "get_gas_limit failed: {}",
                 resp.error().unwrap().message()
-            ))),
+            )),
         }
     }
 
@@ -123,10 +123,10 @@ impl CitaClient {
                 let quota = u64::from_str_radix(&remove_quotes_and_0x(&quota), 16)?;
                 Ok(quota)
             }
-            false => Err(eyre!(format!(
+            false => Err(eyre!(
                 "estimate_quota failed: {}",
                 resp.error().unwrap().message()
-            ))),
+            )),
         }
     }
 
@@ -147,10 +147,10 @@ impl CitaClient {
                 let hash_vec = hex::decode(hash)?;
                 Ok(hash_vec)
             }
-            false => Err(eyre!(format!(
+            false => Err(eyre!(
                 "send_signed_transaction failed: {}",
                 resp.error().unwrap().message()
-            ))),
+            )),
         }
     }
 
@@ -193,11 +193,8 @@ impl CitaClient {
                 })
             }
             false => match resp.error() {
-                Some(e) => Err(eyre!(format!(
-                    "get_transaction_receipt failed: {}",
-                    e.message()
-                ))),
-                None => Err(eyre!(format!("get_transaction_receipt failed: not found",))),
+                Some(e) => Err(eyre!("get_transaction_receipt failed: {}", e.message())),
+                None => Err(eyre!("get_transaction_receipt failed: not found")),
             },
         }
     }

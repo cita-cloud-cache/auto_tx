@@ -1,7 +1,10 @@
 use crate::{send_tx::AutoTx, AutoTxGlobalState};
 
 use color_eyre::eyre::{eyre, Result};
-use common_rs::restful::{ok, RESTfulError};
+use common_rs::{
+    error::CALError,
+    restful::{ok, RESTfulError},
+};
 use salvo::prelude::*;
 use std::sync::Arc;
 
@@ -16,6 +19,9 @@ pub async fn get_receipt(depot: &Depot, req: &Request) -> Result<impl Writer, RE
 
     // get Chain
     let mut chain = state.chains.get_chain(&chain_name).await?;
-    let result = chain.chain_client.get_receipt(&hash).await?;
+    let result = chain.chain_client.get_receipt(&hash).await.map_err(|e| {
+        warn!("get_receipt failed: {e:?}");
+        CALError::NotFound
+    })?;
     ok(result.to_json())
 }

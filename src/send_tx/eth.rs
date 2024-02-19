@@ -2,6 +2,7 @@ use super::{types::*, AutoTx, DEFAULT_QUOTA};
 use crate::kms::Account;
 use crate::storage::Storage;
 use color_eyre::eyre::{eyre, Result};
+use common_rs::error::CALError;
 use ethabi::ethereum_types::{H256, U64};
 use hex::ToHex;
 use web3::types::TransactionReceipt;
@@ -298,7 +299,7 @@ impl AutoTx for EthClient {
                         );
                     }
 
-                    Err(eyre!("not found"))
+                    Err(CALError::NotFound.into())
                 }
             },
             Err(e) => {
@@ -341,7 +342,7 @@ impl AutoTx for EthClient {
                         }
                     }
                 }
-                None => Err(eyre!("not found")),
+                None => Err(CALError::NotFound.into()),
             },
             Err(e) => {
                 warn!("get receipt failed, hash: {}, error: {}", hash, e);

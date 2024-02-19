@@ -1,6 +1,6 @@
 [package]
 name = "auto_tx"
-version = "1.0.2"
+version = "1.1.0"
 authors = ["Rivtower Technologies <contact@rivtower.com>"]
 license = "Apache-2.0"
 edition = "2021"
@@ -16,20 +16,20 @@ common-rs = { git = "https://github.com/cita-cloud-cache/common-rs", default-fea
 
 bincode = "1.3"
 cita-tool = "0.21"
-clap = { version = "4.4", features = ["derive"] }
+clap = { version = "4.5", features = ["derive"] }
 color-eyre = "0.6"
 ethabi = "18.0"
 hex = "0.4"
 md5 = "0.7"
 once_cell = "1.19"
-opendal = { version = "0.44", features = ["services-sled"] }
+opendal = { version = "0.45", features = ["services-sled"] }
 paste = "1.0"
 prost = "0.12"
 reqwest = { version = "0.11", features = ["json"] }
-salvo = { version = "0.65", features = ["affix"] }
+salvo = { version = "0.66", features = ["affix"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tokio = { version = "1.35", features = ["full"] }
+tokio = { version = "1.36", features = ["full"] }
 tracing = "0.1"
 web3 = { git = "https://github.com/cita-cloud-cache/rust-web3" }
 

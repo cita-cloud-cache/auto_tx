@@ -16,6 +16,7 @@ use cita_cloud_proto::evm::{ByteQuota, Receipt};
 use cita_cloud_proto::executor::CallRequest;
 use cita_cloud_proto::retry::RetryClient;
 use color_eyre::eyre::{eyre, Result};
+use common_rs::error::CALError;
 use ethabi::ethereum_types::U256;
 use hex::ToHex;
 use prost::Message;
@@ -88,7 +89,7 @@ macro_rules! cita_cloud_method {
                     .$fn_name(arg)
                     .await
                     .map(|response| response.into_inner())
-                    .map_err(|e| eyre!(format!("{} failed: {}", fn_name, e.message())))
+                    .map_err(|e| eyre!("{} failed: {}", fn_name, e.message()))
             }
         }
     };
@@ -163,7 +164,7 @@ impl CitaCloudClient {
 
                 Ok(Timeout::Cita(timeout))
             }
-            (true, false) => Err(eyre!("timeout")),
+            (true, false) => Err(CALError::TransactionTimeout.into()),
             (false, _) => Ok(Timeout::Cita(timeout)),
         }
     }
