@@ -1,19 +1,22 @@
+use std::collections::HashSet;
+
 use crate::{kms::Account, send_tx::types::*};
 use color_eyre::eyre::{eyre, Result};
-use opendal::{services::Sled, EntryMode, Operator};
+use etcd_client::{Client, GetOptions};
 use paste::paste;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Storage {
-    operator: Operator,
+    operator: Client,
 }
 
 impl Storage {
-    pub fn new(datadir: String) -> Self {
-        info!("auto_tx datadir: {}", datadir);
-        let mut builder = Sled::default();
-        builder.datadir(&datadir);
-        let operator = Operator::new(builder).unwrap().finish();
+    pub async fn new(endpoints: Vec<String>) -> Self {
+        info!(" etcd endpoints: {:?}", endpoints);
+        let operator = Client::connect(&endpoints, None)
+            .await
+            .map_err(|e| println!("etcd connect failed: {e}"))
+            .unwrap();
         Self { operator }
     }
 }
@@ -26,29 +29,36 @@ macro_rules! store_and_load {
                     let data_vec = bincode::serialize(&data)?;
                     let path = format!("{}/{}/{}", $dir, request_key, stringify!($var_name));
                     self.operator
-                        .write(&path, data_vec)
+                        .clone()
+                        .put(path, data_vec, None)
                         .await
-                        .map_err(|e| eyre!(e.to_string()))
+                        .map_err(|e| eyre!(e.to_string())).map(|_| ())
                 }
 
                 pub($vis) async fn [<load_$var_name>](&self, request_key: &str) -> Result<$data_type> {
                     let path = format!("{}/{}/{}", $dir, request_key, stringify!($var_name));
                     let data_vec = self
                         .operator
-                        .read(&path)
+                        .clone()
+                        .get(path, None)
                         .await
                         .map_err(|e| eyre!(e.to_string()))?;
-                    let data = bincode::deserialize::<$data_type>(&data_vec)?;
-                    Ok(data)
+                    if let Some(kv) = data_vec.kvs().first() {
+                        let data = bincode::deserialize::<$data_type>(kv.value())?;
+                        Ok(data)
+                    } else {
+                        Err(eyre!("data not found"))
+                    }
                 }
 
                 #[allow(unused)]
                 async fn [<delete_$var_name>](&self, request_key: &str) -> Result<()> {
                     let path = format!("{}/{}/{}", $dir, request_key, stringify!($var_name));
                     self.operator
-                        .delete(&path)
+                        .clone()
+                        .delete(path, None)
                         .await
-                        .map_err(|e| eyre!(e.to_string()))
+                        .map_err(|e| eyre!(e.to_string())).map(|_| ())
                 }
             }
         }
@@ -144,15 +154,19 @@ impl Storage {
     }
 
     pub async fn get_processing_tasks(&self) -> Result<Vec<String>> {
-        let entries = self.operator.list("processing/").await?;
-        let mut result = vec![];
-        for e in entries.into_iter() {
-            if e.metadata().mode() == EntryMode::DIR {
-                let key = e.name().trim_end_matches('/').to_string();
-                result.push(key);
+        let option = GetOptions::new().with_prefix();
+        let entries = self
+            .operator
+            .clone()
+            .get("processing/", Some(option))
+            .await?;
+        let mut result = HashSet::new();
+        for e in entries.kvs().iter() {
+            if let Some(key) = e.key_str()?.split('/').take(2).last() {
+                result.insert(key.to_owned());
             }
         }
 
-        Ok(result)
+        Ok(result.into_iter().collect())
     }
 }
