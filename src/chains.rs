@@ -75,9 +75,9 @@ impl Chain {
         let chain_type = chain_info.chain_type.to_lowercase();
         let chain_client = match chain_type.as_str() {
             "cita-cloud" => {
-                let mut client = CitaCloudClient::new(&chain_info.chain_url)?;
+                let mut client = CitaCloudClient::new(&chain_info.chain_url, chain_name)?;
                 client
-                    .get_gas_limit()
+                    .get_gas_limit(None)
                     .await
                     .map_err(|_| eyre!("cita-cloud url check failed"))?;
                 ChainClient::CitaCloud(client)

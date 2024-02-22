@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use crate::{kms::Account, send_tx::types::*};
 use color_eyre::eyre::{eyre, Result};
-use etcd_client::{Client, GetOptions};
+use etcd_client::{Client, GetOptions, PutOptions};
 use paste::paste;
 
 #[derive(Clone)]
@@ -18,6 +18,29 @@ impl Storage {
             .map_err(|e| println!("etcd connect failed: {e}"))
             .unwrap();
         Self { operator }
+    }
+
+    pub async fn put_with_lease(
+        &self,
+        key: impl Into<Vec<u8>>,
+        value: impl Into<Vec<u8>>,
+        ttl: i64,
+    ) -> Result<()> {
+        let mut storage = self.operator.clone();
+        let lease = storage.lease_grant(ttl, None).await?;
+        let option = PutOptions::new().with_lease(lease.id());
+        storage.put(key, value, Some(option)).await?;
+        Ok(())
+    }
+
+    pub async fn get(&self, key: impl Into<Vec<u8>>) -> Result<Vec<u8>> {
+        let mut storage = self.operator.clone();
+        let data_vec = storage.get(key, None).await?;
+        if let Some(kv) = data_vec.kvs().first() {
+            Ok(kv.value().to_vec())
+        } else {
+            Err(eyre!("data not found"))
+        }
     }
 }
 
