@@ -144,7 +144,7 @@ impl CitaClient {
         let version = self
             .client
             .get_version()
-            .map_err(|_| eyre!("process_send_task get_version failed"))?;
+            .map_err(|_| eyre!("get_version failed"))?;
         if let Some(storage) = storage {
             let version_bytes = version.to_be_bytes();
             storage.put_with_lease(key, version_bytes, 3).await.ok();
@@ -163,7 +163,7 @@ impl CitaClient {
         let chain_id = self
             .client
             .get_chain_id()
-            .map_err(|_| eyre!("cita client get_chain_id failed"))?;
+            .map_err(|_| eyre!("get_chain_id failed"))?;
         if let Some(storage) = storage {
             let chain_id_bytes = chain_id.to_be_bytes();
             storage.put_with_lease(key, chain_id_bytes, 3).await.ok();
@@ -180,7 +180,7 @@ impl CitaClient {
         let chain_id = hex::decode(
             self.client
                 .get_chain_id_v1()
-                .map_err(|_| eyre!("cita client get_chain_id failed"))?
+                .map_err(|_| eyre!("get_chain_id_v1 failed"))?
                 .completed_lower_hex(),
         )?;
         if let Some(storage) = storage {

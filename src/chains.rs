@@ -91,9 +91,9 @@ impl Chain {
                 ChainClient::Cita(client)
             }
             "eth" => {
-                let client = EthClient::new(&chain_info.chain_url)?;
+                let client = EthClient::new(&chain_info.chain_url, chain_name)?;
                 client
-                    .get_gas_limit()
+                    .get_gas_limit(None)
                     .await
                     .map_err(|_| eyre!("eth url check failed"))?;
                 ChainClient::Eth(client)
