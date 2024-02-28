@@ -35,6 +35,7 @@ impl From<&SendTask> for CitaTransaction {
 
 #[derive(Clone)]
 pub struct CitaClient {
+    pub chain_name: String,
     pub client: Client,
 }
 
@@ -44,37 +45,62 @@ pub struct ReceiptInfo {
 }
 
 impl CitaClient {
-    pub fn new(url: &str) -> Result<Self> {
+    pub fn new(url: &str, name: &str) -> Result<Self> {
         let client = Client::new().set_uri(url);
-        Ok(Self { client })
+        Ok(Self {
+            client,
+            chain_name: name.to_owned(),
+        })
     }
 
-    fn get_block_interval(&self) -> Result<u64> {
+    async fn get_block_interval(&self, storage: Option<&Storage>) -> Result<u64> {
+        let key = format!("AutoTx/ChainSysConfig/{}/block_interval", self.chain_name);
+        if let Some(storage) = storage {
+            if let Ok(block_interval_bytes) = storage.get(key.clone()).await {
+                let block_interval = u64::from_be_bytes(block_interval_bytes.try_into().unwrap());
+                return Ok(block_interval);
+            }
+        }
         let resp = self
             .client
             .get_metadata("latest")
             .map_err(|_| eyre!("get_metadata failed"))?;
-
-        match resp.is_ok() {
+        let block_interval = match resp.is_ok() {
             true => {
                 let ResponseValue::Map(map) = resp.result().unwrap() else {
                     unreachable!()
                 };
-                let block_interval_str = map
-                    .get("blockInterval")
+                map.get("blockInterval")
                     .map(|p| p.to_string())
-                    .unwrap_or_default();
-                let block_interval = block_interval_str.parse::<u64>()? / 1000;
-                Ok(block_interval)
+                    .unwrap_or_default()
+                    .parse::<u64>()?
+                    / 1000
             }
-            false => Err(eyre!(
-                "get_block_interval failed: {}",
-                resp.error().unwrap().message()
-            )),
+            false => {
+                return Err(eyre!(
+                    "get_block_interval failed: {}",
+                    resp.error().unwrap().message()
+                ))
+            }
+        };
+        if let Some(storage) = storage {
+            let block_interval_bytes = block_interval.to_be_bytes();
+            storage
+                .put_with_lease(key, block_interval_bytes, 3)
+                .await
+                .ok();
         }
+        Ok(block_interval)
     }
 
-    pub fn get_gas_limit(&self) -> Result<u64> {
+    pub async fn get_gas_limit(&self, storage: Option<&Storage>) -> Result<u64> {
+        let key = format!("AutoTx/ChainSysConfig/{}/gas_limit", self.chain_name);
+        if let Some(storage) = storage {
+            if let Ok(gas_limit_bytes) = storage.get(key.clone()).await {
+                let gas_limit = u64::from_be_bytes(gas_limit_bytes.try_into().unwrap());
+                return Ok(gas_limit);
+            }
+        }
         let resp = self
             .client
             .call(
@@ -85,21 +111,82 @@ impl CitaClient {
                 false,
             )
             .map_err(|_| eyre!("get_gas_limit failed"))?;
-
-        match resp.is_ok() {
+        let gas_limit = match resp.is_ok() {
             true => {
                 let ResponseValue::Singe(ParamsValue::String(gas_limit)) = resp.result().unwrap()
                 else {
                     unreachable!()
                 };
-                let gas_limit = u64::from_str_radix(&remove_quotes_and_0x(&gas_limit), 16)?;
-                Ok(gas_limit)
+                u64::from_str_radix(&remove_quotes_and_0x(&gas_limit), 16)?
             }
-            false => Err(eyre!(
-                "get_gas_limit failed: {}",
-                resp.error().unwrap().message()
-            )),
+            false => {
+                return Err(eyre!(
+                    "get_gas_limit failed: {}",
+                    resp.error().unwrap().message()
+                ))
+            }
+        };
+        if let Some(storage) = storage {
+            let gas_limit_bytes = gas_limit.to_be_bytes();
+            storage.put_with_lease(key, gas_limit_bytes, 3).await.ok();
         }
+        Ok(gas_limit)
+    }
+
+    async fn get_version(&self, storage: Option<&Storage>) -> Result<u32> {
+        let key = format!("AutoTx/ChainSysConfig/{}/version", self.chain_name);
+        if let Some(storage) = storage {
+            if let Ok(version_bytes) = storage.get(key.clone()).await {
+                let version = u32::from_be_bytes(version_bytes.try_into().unwrap());
+                return Ok(version);
+            }
+        }
+        let version = self
+            .client
+            .get_version()
+            .map_err(|_| eyre!("process_send_task get_version failed"))?;
+        if let Some(storage) = storage {
+            let version_bytes = version.to_be_bytes();
+            storage.put_with_lease(key, version_bytes, 3).await.ok();
+        }
+        Ok(version)
+    }
+
+    async fn get_chain_id(&mut self, storage: Option<&Storage>) -> Result<u32> {
+        let key = format!("AutoTx/ChainSysConfig/{}/chain_id", self.chain_name);
+        if let Some(storage) = storage {
+            if let Ok(chain_id_bytes) = storage.get(key.clone()).await {
+                let chain_id = u32::from_be_bytes(chain_id_bytes.try_into().unwrap());
+                return Ok(chain_id);
+            }
+        }
+        let chain_id = self
+            .client
+            .get_chain_id()
+            .map_err(|_| eyre!("cita client get_chain_id failed"))?;
+        if let Some(storage) = storage {
+            let chain_id_bytes = chain_id.to_be_bytes();
+            storage.put_with_lease(key, chain_id_bytes, 3).await.ok();
+        }
+        Ok(chain_id)
+    }
+    async fn get_chain_id_v1(&mut self, storage: Option<&Storage>) -> Result<Vec<u8>> {
+        let key = format!("AutoTx/ChainSysConfig/{}/chain_id_v1", self.chain_name);
+        if let Some(storage) = storage {
+            if let Ok(chain_id_v1) = storage.get(key.clone()).await {
+                return Ok(chain_id_v1);
+            }
+        }
+        let chain_id = hex::decode(
+            self.client
+                .get_chain_id_v1()
+                .map_err(|_| eyre!("cita client get_chain_id failed"))?
+                .completed_lower_hex(),
+        )?;
+        if let Some(storage) = storage {
+            storage.put_with_lease(key, chain_id.clone(), 3).await.ok();
+        }
+        Ok(chain_id)
     }
 
     fn estimate_quota(
@@ -201,10 +288,14 @@ impl CitaClient {
 }
 
 impl CitaClient {
-    pub async fn try_update_timeout(&mut self, timeout: Timeout) -> Result<Timeout> {
+    pub async fn try_update_timeout(
+        &mut self,
+        timeout: Timeout,
+        storage: Option<&Storage>,
+    ) -> Result<Timeout> {
         let mut timeout = timeout.get_cita_timeout();
 
-        let block_interval = self.get_block_interval()? as u32;
+        let block_interval = self.get_block_interval(storage).await? as u32;
         let block_limit = CITA_BLOCK_LIMIT as u32;
         let current_height = self
             .client
@@ -245,7 +336,7 @@ impl CitaClient {
         }
     }
 
-    pub async fn estimate_gas(&mut self, send_data: SendData) -> Gas {
+    pub async fn estimate_gas(&mut self, send_data: SendData, storage: Option<&Storage>) -> Gas {
         match send_data.tx_data.tx_type() {
             TxType::Store => Gas {
                 // 200 gas per byte
@@ -254,7 +345,10 @@ impl CitaClient {
             },
             TxType::Create => Gas { gas: DEFAULT_QUOTA },
             TxType::Normal => {
-                let quota_limit = self.get_gas_limit().unwrap_or(DEFAULT_QUOTA_LIMIT);
+                let quota_limit = self
+                    .get_gas_limit(storage)
+                    .await
+                    .unwrap_or(DEFAULT_QUOTA_LIMIT);
                 let to_vec = send_data.tx_data.to.clone().unwrap_or_default();
                 let to = &add_0x(to_vec.encode_hex::<String>());
                 let from = add_0x(send_data.account.address().encode_hex::<String>());
@@ -271,8 +365,8 @@ impl CitaClient {
         }
     }
 
-    pub async fn self_update_gas(&mut self, gas: Gas) -> Result<Gas> {
-        let quota_limit = self.get_gas_limit()?;
+    pub async fn self_update_gas(&mut self, gas: Gas, storage: Option<&Storage>) -> Result<Gas> {
+        let quota_limit = self.get_gas_limit(storage).await?;
         let gas = gas.gas;
         if quota_limit == gas {
             Err(eyre!("reach quota_limit"))
@@ -294,10 +388,12 @@ impl AutoTx for CitaClient {
             remain_time: init_task.timeout,
             valid_until_block: 0,
         });
-        let timeout = self.try_update_timeout(timeout).await?;
+        let timeout = self.try_update_timeout(timeout, Some(storage)).await?;
 
         // get Gas
-        let gas = self.estimate_gas(init_task.send_data.clone()).await;
+        let gas = self
+            .estimate_gas(init_task.send_data.clone(), Some(storage))
+            .await;
 
         // store all
         let request_key = &init_task.base_data.request_key;
@@ -318,28 +414,17 @@ impl AutoTx for CitaClient {
         let mut cita_tx = CitaTransaction::from(send_task);
 
         // update args
-        let version = self
-            .client
-            .get_version()
-            .map_err(|_| eyre!("process_send_task get_version failed"))?;
+        let version = self.get_version(Some(storage)).await?;
         match version {
             0 => {
                 // new to must be empty
                 cita_tx.to_v1 = Vec::new();
-                cita_tx.chain_id = self
-                    .client
-                    .get_chain_id()
-                    .map_err(|_| eyre!("update_args get_chain_id failed"))?;
+                cita_tx.chain_id = self.get_chain_id(Some(storage)).await?;
             }
             version if version < 3 => {
                 // old to must be empty
                 cita_tx.to = String::new();
-                cita_tx.chain_id_v1 = hex::decode(
-                    self.client
-                        .get_chain_id_v1()
-                        .map_err(|_| eyre!("update_args get_chain_id_v1 failed"))?
-                        .completed_lower_hex(),
-                )?;
+                cita_tx.chain_id_v1 = self.get_chain_id_v1(Some(storage)).await?;
             }
             _ => unreachable!(),
         }
@@ -389,7 +474,7 @@ impl AutoTx for CitaClient {
                     e.to_string(),
                     timeout.get_cita_timeout().remain_time
                 );
-                match self.try_update_timeout(timeout).await {
+                match self.try_update_timeout(timeout, Some(storage)).await {
                     Ok(new_timeout) => {
                         if timeout != new_timeout {
                             storage.store_timeout(request_key, &new_timeout).await?;
@@ -447,7 +532,7 @@ impl AutoTx for CitaClient {
                             "Out of quota." => {
                                 // self_update and resend
                                 let gas = storage.load_gas(request_key).await?;
-                                match self.self_update_gas(gas).await {
+                                match self.self_update_gas(gas, Some(storage)).await {
                                     Ok(gas) => {
                                         storage.store_gas(request_key, &gas).await?;
                                         storage.downgrade_to_unsend(request_key).await?;
@@ -497,7 +582,7 @@ impl AutoTx for CitaClient {
                     e.to_string(),
                     timeout.get_cita_timeout().remain_time
                 );
-                match self.try_update_timeout(timeout).await {
+                match self.try_update_timeout(timeout, Some(storage)).await {
                     Ok(new_timeout) => {
                         if timeout != new_timeout {
                             storage.store_timeout(request_key, &new_timeout).await?;

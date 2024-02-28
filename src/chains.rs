@@ -83,9 +83,10 @@ impl Chain {
                 ChainClient::CitaCloud(client)
             }
             "cita" => {
-                let client = CitaClient::new(&chain_info.chain_url)?;
+                let client = CitaClient::new(&chain_info.chain_url, chain_name)?;
                 client
-                    .get_gas_limit()
+                    .get_gas_limit(None)
+                    .await
                     .map_err(|_| eyre!("cita url check failed"))?;
                 ChainClient::Cita(client)
             }
