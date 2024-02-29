@@ -50,7 +50,7 @@ macro_rules! store_and_load {
             impl Storage {
                 pub($vis) async fn [<store_$var_name>](&self, request_key: &str, data: &$data_type) -> Result<()> {
                     let data_vec = bincode::serialize(&data)?;
-                    let path = format!("{}/{}/{}", $dir, request_key, stringify!($var_name));
+                    let path = format!("AutoTx/{}/{}/{}", $dir, request_key, stringify!($var_name));
                     self.operator
                         .clone()
                         .put(path, data_vec, None)
@@ -59,7 +59,7 @@ macro_rules! store_and_load {
                 }
 
                 pub($vis) async fn [<load_$var_name>](&self, request_key: &str) -> Result<$data_type> {
-                    let path = format!("{}/{}/{}", $dir, request_key, stringify!($var_name));
+                    let path = format!("AutoTx/{}/{}/{}", $dir, request_key, stringify!($var_name));
                     let data_vec = self
                         .operator
                         .clone()
@@ -76,7 +76,7 @@ macro_rules! store_and_load {
 
                 #[allow(unused)]
                 async fn [<delete_$var_name>](&self, request_key: &str) -> Result<()> {
-                    let path = format!("{}/{}/{}", $dir, request_key, stringify!($var_name));
+                    let path = format!("AutoTx/{}/{}/{}", $dir, request_key, stringify!($var_name));
                     self.operator
                         .clone()
                         .delete(path, None)

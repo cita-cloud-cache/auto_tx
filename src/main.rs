@@ -40,7 +40,7 @@ use crate::{
 use chains::Chains;
 use clap::Parser;
 use color_eyre::eyre::Result;
-use common_rs::{configure::file_config, consul, restful::http_serve};
+use common_rs::{configure::file_config, etcd, restful::http_serve};
 use config::{CitaCreateConfig, Config};
 use salvo::prelude::*;
 use send_tx::handle_send_tx;
@@ -132,10 +132,7 @@ pub struct AutoTxGlobalState {
 impl AutoTxGlobalState {
     async fn new(config: Config) -> Self {
         Self {
-            chains: Chains::new(
-                config.consul_config.unwrap_or_default().consul_addr,
-                config.consul_dir,
-            ),
+            chains: Chains::new(config.etcd_endpoints.clone()).await,
             storage: Storage::new(config.etcd_endpoints).await,
             max_timeout: config.max_timeout,
             cita_create_config: config.cita_create_config,
@@ -172,8 +169,9 @@ async fn run(opts: RunOpts) -> Result<()> {
 
     let process_interval = config.process_interval;
 
-    if let Some(consul_config) = &config.consul_config {
-        consul::keep_service_register_in_k8s(consul_config)
+    if let Some(service_register_config) = &config.service_register_config {
+        let etcd = etcd::Etcd::new(config.etcd_endpoints.clone()).await?;
+        etcd.keep_service_register_in_k8s(service_register_config.clone())
             .await
             .ok();
     }

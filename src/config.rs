@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use cloud_util::tracer::LogConfig;
-use common_rs::consul::ConsulConfig;
+use common_rs::etcd::ServiceRegisterConfig;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -47,8 +47,7 @@ pub struct Config {
 
     pub cita_create_config: Option<CitaCreateConfig>,
 
-    pub consul_config: Option<ConsulConfig>,
-    pub consul_dir: String,
+    pub service_register_config: Option<ServiceRegisterConfig>,
 }
 
 impl Default for Config {
@@ -65,10 +64,9 @@ impl Default for Config {
 
             cita_create_config: None,
 
-            consul_config: Default::default(),
+            service_register_config: Default::default(),
 
             fast_mode: false,
-            consul_dir: "chain-cache/".to_string(),
         }
     }
 }

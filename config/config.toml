@@ -1,5 +1,8 @@
 port = 3000
 kms_url = "http://api.rivtower.cc/rivtrust-kms"
+etcd_endpoints = [
+    "127.0.0.1:2379",
+]
 
 #[cita_create_config]
 #chain_name = ""
@@ -11,22 +14,15 @@ kms_url = "http://api.rivtower.cc/rivtrust-kms"
 #verify = ""
 #dapp_name = ""
 
-[consul_config]
-consul_addr = "https://consul.rivtower.xyz"
+[service_register_config]
 service_name = "auto_tx"
-service_id = "auto_tx_0"
-service_address = "127.0.0.1"
 service_port = 3000
+ttl = 60
 tags = [
-    "traefik.enable=true",
-    "traefik.http.middlewares.cache-auto-tx-stripprefix.stripprefix.prefixes=/auto_tx",
-    "traefik.http.routers.req_cache.middlewares=cache-forward-auth,cache-auto-tx-stripprefix",
-    "traefik.http.routers.req_cache.rule=PathPrefix(`/auto_tx`) && (Headers(`version`, `latest`) || !HeadersRegexp(`version`, `.*?`))",
+    "traefik/http/middlewares/cache-auto-tx-stripprefix/stripprefix/prefixes=/auto_tx",
+    "traefik/http/routers/auto_tx/middlewares=cache-forward-auth,cache-auto-tx-stripprefix",
+    "traefik/http/routers/auto_tx/rule=PathPrefix(`/auto_tx`) && (Headers(`version`, `latest`) || !HeadersRegexp(`version`, `.*?`))",
 ]
-check_http_path = "/health"
-check_interval = "10s"
-check_timeout = "3s"
-check_deregister_critical_service_after = "1m"
 
 [log_config]
 service_name = "auto_tx"
