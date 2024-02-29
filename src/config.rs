@@ -43,7 +43,7 @@ pub struct Config {
 
     pub fast_mode: bool,
     pub max_timeout: u32,
-    pub data_dir: String,
+    pub etcd_endpoints: Vec<String>,
 
     pub cita_create_config: Option<CitaCreateConfig>,
 
@@ -61,7 +61,7 @@ impl Default for Config {
             log_config: Default::default(),
             max_timeout: 600,
             process_interval: 5,
-            data_dir: "./data".to_string(),
+            etcd_endpoints: vec!["127.0.0.1:2379".to_string()],
 
             cita_create_config: None,
 

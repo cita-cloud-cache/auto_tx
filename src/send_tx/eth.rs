@@ -40,26 +40,42 @@ impl From<&SendTask> for TransactionParameters {
 
 #[derive(Clone, Debug)]
 pub struct EthClient {
+    chain_name: String,
     web3: Web3<Http>,
 }
 
 impl EthClient {
-    pub fn new(url: &str) -> Result<Self> {
+    pub fn new(url: &str, name: &str) -> Result<Self> {
         let transport = web3::transports::Http::new(url)?;
         let web3 = web3::Web3::new(transport);
-        Ok(Self { web3 })
+        Ok(Self {
+            web3,
+            chain_name: name.to_string(),
+        })
     }
 
-    pub async fn get_gas_limit(&self) -> Result<u64> {
-        let gas_limit = self
+    pub async fn get_gas_limit(&self, storage: Option<&Storage>) -> Result<u64> {
+        let key = format!("AutoTx/ChainSysConfig/{}/gas_limit", self.chain_name);
+        if let Some(storage) = storage {
+            if let Ok(gas_limit_bytes) = storage.get(key.clone()).await {
+                let gas_limit = u64::from_be_bytes(gas_limit_bytes.try_into().unwrap());
+                return Ok(gas_limit);
+            }
+        }
+        let gas_limit = (self
             .web3
             .eth()
             .block(BlockId::Number(BlockNumber::Latest))
             .await?
             .ok_or(eyre!("get_gas_limit get block failed"))?
             .gas_limit
-            / 2;
-        Ok(gas_limit.as_u64())
+            / 2)
+        .as_u64();
+        if let Some(storage) = storage {
+            let gas_limit_bytes = gas_limit.to_be_bytes();
+            storage.put_with_lease(key, gas_limit_bytes, 3).await.ok();
+        }
+        Ok(gas_limit)
     }
 
     async fn web3_estimate_gas(&self, call_request: CallRequest) -> Result<u64> {
@@ -120,8 +136,8 @@ impl EthClient {
         Gas { gas }
     }
 
-    pub async fn self_update_gas(&mut self, gas: Gas) -> Result<Gas> {
-        let quota_limit = self.get_gas_limit().await?;
+    pub async fn self_update_gas(&mut self, gas: Gas, storage: Option<&Storage>) -> Result<Gas> {
+        let quota_limit = self.get_gas_limit(storage).await?;
         let gas = gas.gas;
         if quota_limit == gas {
             Err(eyre!("reach quota_limit"))
@@ -246,7 +262,7 @@ impl AutoTx for EthClient {
                             if status == U64::from(0) && used.as_u64() == gas.gas =>
                         {
                             // self_update and resend
-                            match self.self_update_gas(gas).await {
+                            match self.self_update_gas(gas, Some(storage)).await {
                                 Ok(gas) => {
                                     storage.store_gas(request_key, &gas).await?;
                                     storage.downgrade_to_unsend(request_key).await?;

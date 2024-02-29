@@ -130,13 +130,13 @@ pub struct AutoTxGlobalState {
 }
 
 impl AutoTxGlobalState {
-    fn new(config: Config) -> Self {
+    async fn new(config: Config) -> Self {
         Self {
             chains: Chains::new(
                 config.consul_config.unwrap_or_default().consul_addr,
                 config.consul_dir,
             ),
-            storage: Storage::new(config.data_dir),
+            storage: Storage::new(config.etcd_endpoints).await,
             max_timeout: config.max_timeout,
             cita_create_config: config.cita_create_config,
             processing_lock: Arc::new(ProcessingLock::new()),
@@ -178,7 +178,7 @@ async fn run(opts: RunOpts) -> Result<()> {
             .ok();
     }
 
-    let state = Arc::new(AutoTxGlobalState::new(config));
+    let state = Arc::new(AutoTxGlobalState::new(config).await);
 
     let router = Router::new()
         .hoop(affix::inject(state.clone()))
