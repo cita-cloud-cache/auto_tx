@@ -167,6 +167,7 @@ async fn run(opts: RunOpts) -> Result<()> {
         info!("run without CitaCreateConfig")
     }
 
+    let service_name = config.name.clone();
     let port = config.port;
 
     let process_interval = config.process_interval;
@@ -253,7 +254,7 @@ async fn run(opts: RunOpts) -> Result<()> {
         }
     });
 
-    http_serve("auto_tx", port, router).await;
+    http_serve(&service_name, port, router).await;
 
     Ok(())
 }
