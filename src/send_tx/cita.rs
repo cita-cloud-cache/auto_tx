@@ -1,4 +1,5 @@
 use super::{types::*, AutoTx, BASE_QUOTA, DEFAULT_QUOTA, DEFAULT_QUOTA_LIMIT};
+use crate::config::CONFIG;
 use crate::kms::Kms;
 use crate::storage::Storage;
 use crate::util::{add_0x, remove_quotes_and_0x};
@@ -54,7 +55,11 @@ impl CitaClient {
     }
 
     async fn get_block_interval(&self, storage: Option<&Storage>) -> Result<u64> {
-        let key = format!("AutoTx/ChainSysConfig/{}/block_interval", self.chain_name);
+        let key = format!(
+            "{}/ChainSysConfig/{}/block_interval",
+            CONFIG.get().unwrap().name,
+            self.chain_name
+        );
         if let Some(storage) = storage {
             if let Ok(block_interval_bytes) = storage.get(key.clone()).await {
                 let block_interval = u64::from_be_bytes(block_interval_bytes.try_into().unwrap());
@@ -94,7 +99,11 @@ impl CitaClient {
     }
 
     pub async fn get_gas_limit(&self, storage: Option<&Storage>) -> Result<u64> {
-        let key = format!("AutoTx/ChainSysConfig/{}/gas_limit", self.chain_name);
+        let key = format!(
+            "{}/ChainSysConfig/{}/gas_limit",
+            CONFIG.get().unwrap().name,
+            self.chain_name
+        );
         if let Some(storage) = storage {
             if let Ok(gas_limit_bytes) = storage.get(key.clone()).await {
                 let gas_limit = u64::from_be_bytes(gas_limit_bytes.try_into().unwrap());
@@ -134,7 +143,11 @@ impl CitaClient {
     }
 
     async fn get_version(&self, storage: Option<&Storage>) -> Result<u32> {
-        let key = format!("AutoTx/ChainSysConfig/{}/version", self.chain_name);
+        let key = format!(
+            "{}/ChainSysConfig/{}/version",
+            CONFIG.get().unwrap().name,
+            self.chain_name
+        );
         if let Some(storage) = storage {
             if let Ok(version_bytes) = storage.get(key.clone()).await {
                 let version = u32::from_be_bytes(version_bytes.try_into().unwrap());
@@ -153,7 +166,11 @@ impl CitaClient {
     }
 
     async fn get_chain_id(&mut self, storage: Option<&Storage>) -> Result<u32> {
-        let key = format!("AutoTx/ChainSysConfig/{}/chain_id", self.chain_name);
+        let key = format!(
+            "{}/ChainSysConfig/{}/chain_id",
+            CONFIG.get().unwrap().name,
+            self.chain_name
+        );
         if let Some(storage) = storage {
             if let Ok(chain_id_bytes) = storage.get(key.clone()).await {
                 let chain_id = u32::from_be_bytes(chain_id_bytes.try_into().unwrap());
@@ -171,7 +188,11 @@ impl CitaClient {
         Ok(chain_id)
     }
     async fn get_chain_id_v1(&mut self, storage: Option<&Storage>) -> Result<Vec<u8>> {
-        let key = format!("AutoTx/ChainSysConfig/{}/chain_id_v1", self.chain_name);
+        let key = format!(
+            "{}/ChainSysConfig/{}/chain_id_v1",
+            CONFIG.get().unwrap().name,
+            self.chain_name
+        );
         if let Some(storage) = storage {
             if let Ok(chain_id_v1) = storage.get(key.clone()).await {
                 return Ok(chain_id_v1);

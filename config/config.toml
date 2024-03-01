@@ -1,3 +1,4 @@
+name = "auto_tx"
 port = 3000
 kms_url = "http://api.rivtower.cc/rivtrust-kms"
 etcd_endpoints = [
@@ -15,8 +16,6 @@ etcd_endpoints = [
 #dapp_name = ""
 
 [service_register_config]
-service_name = "auto_tx"
-service_port = 3000
 ttl = 60
 tags = [
     "traefik/http/middlewares/cache-auto-tx-stripprefix/stripprefix/prefixes=/auto_tx",
@@ -25,10 +24,8 @@ tags = [
 ]
 
 [log_config]
-service_name = "auto_tx"
 max_level = "info"
 filter = "info"
 # max_level = "debug"
 # filter = "debug,hyper=info,opendal=info,sled=info,reqwest=info,h2=info,tower=info"
 # rolling_file_path = "./logs"
-# agent_endpoint = "127.0.0.1:6831"

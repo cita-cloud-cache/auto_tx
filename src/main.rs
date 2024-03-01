@@ -32,6 +32,7 @@ mod storage;
 mod util;
 
 use crate::{
+    config::set_config,
     get_onchain_hash::get_onchain_hash as get_onchain_hash_handler,
     get_receipt::get_receipt as get_receipt_handler,
     kms::set_kms,
@@ -40,7 +41,7 @@ use crate::{
 use chains::Chains;
 use clap::Parser;
 use color_eyre::eyre::Result;
-use common_rs::{configure::file_config, etcd, restful::http_serve};
+use common_rs::{configure::file_config, etcd, log, restful::http_serve};
 use config::{CitaCreateConfig, Config};
 use salvo::prelude::*;
 use send_tx::handle_send_tx;
@@ -147,10 +148,11 @@ async fn run(opts: RunOpts) -> Result<()> {
     ::std::env::set_var("RUST_BACKTRACE", "full");
 
     let config: Config = file_config(&opts.config_path)?;
+    set_config(config.clone());
     set_kms(config.kms_url.clone());
 
     // init tracer
-    cloud_util::tracer::init_tracer("auto_tx".to_string(), &config.log_config)
+    log::init_tracing(&config.name, &config.log_config)
         .map_err(|e| println!("tracer init err: {e}"))
         .unwrap();
 
@@ -171,9 +173,13 @@ async fn run(opts: RunOpts) -> Result<()> {
 
     if let Some(service_register_config) = &config.service_register_config {
         let etcd = etcd::Etcd::new(config.etcd_endpoints.clone()).await?;
-        etcd.keep_service_register_in_k8s(service_register_config.clone())
-            .await
-            .ok();
+        etcd.keep_service_register_in_k8s(
+            &config.name,
+            config.port,
+            service_register_config.clone(),
+        )
+        .await
+        .ok();
     }
 
     let state = Arc::new(AutoTxGlobalState::new(config).await);

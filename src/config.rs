@@ -12,9 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use cloud_util::tracer::LogConfig;
-use common_rs::etcd::ServiceRegisterConfig;
+use common_rs::{etcd::ServiceRegisterConfig, log::LogConfig};
+use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
+
+pub static CONFIG: OnceCell<Config> = OnceCell::new();
+
+pub fn set_config(config: Config) {
+    CONFIG.get_or_init(|| config);
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
@@ -31,9 +37,10 @@ pub struct CitaCreateConfig {
     pub dapp_name: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
+    pub name: String,
     pub port: u16,
 
     pub kms_url: String,
@@ -53,6 +60,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            name: "auto_tx".to_string(),
             port: 3000,
 
             kms_url: Default::default(),
