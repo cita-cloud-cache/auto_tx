@@ -181,7 +181,10 @@ impl Storage {
         let entries = self
             .operator
             .clone()
-            .get("processing/", Some(option))
+            .get(
+                format!("{}/processing/", crate::config::CONFIG.get().unwrap().name),
+                Some(option),
+            )
             .await?;
         let mut result = HashSet::new();
         for e in entries.kvs().iter() {
