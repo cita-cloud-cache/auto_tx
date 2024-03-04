@@ -22,6 +22,10 @@ pub fn set_config(config: Config) {
     CONFIG.get_or_init(|| config);
 }
 
+pub fn get_config() -> &'static Config {
+    CONFIG.get_or_init(Config::default)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct CitaCreateConfig {

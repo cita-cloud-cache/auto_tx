@@ -87,7 +87,7 @@ fn main() {
     match opts.subcmd {
         SubCommand::Run(opts) => {
             if let Err(e) = run(opts) {
-                warn!("err: {:?}", e);
+                println!("err: {:?}", e);
             }
         }
     }
@@ -152,9 +152,7 @@ async fn run(opts: RunOpts) -> Result<()> {
     set_kms(config.kms_url.clone());
 
     // init tracer
-    log::init_tracing(&config.name, &config.log_config)
-        .map_err(|e| println!("tracer init err: {e}"))
-        .unwrap();
+    log::init_tracing(&config.name, &config.log_config)?;
 
     info!("fast_mode: {}", config.fast_mode);
     info!("process_interval: {}", config.process_interval);
@@ -202,46 +200,47 @@ async fn run(opts: RunOpts) -> Result<()> {
                         if !state.processing_lock.is_processing(&request_key).await {
                             tokio::spawn(async move {
                                 state.processing_lock.lock_task(&request_key).await;
-                                let status = state.storage.load_status(&request_key).await.unwrap();
-                                match status {
-                                    Status::Unsend => {
-                                        let send_task = state
-                                            .storage
-                                            .load_send_task(&request_key)
-                                            .await
-                                            .unwrap();
-                                        let chain_name = send_task.base_data.chain_name.as_ref();
-                                        let mut client = state
-                                            .chains
-                                            .get_chain(chain_name)
-                                            .await
-                                            .unwrap()
-                                            .chain_client;
-                                        let _ = client
-                                            .process_send_task(&send_task, &state.storage)
-                                            .await;
-                                    }
-                                    Status::Uncheck => {
-                                        let check_task = state
-                                            .storage
-                                            .load_check_task(&request_key)
-                                            .await
-                                            .unwrap();
-                                        let chain_name = check_task.base_data.chain_name.as_ref();
-                                        let mut client = state
-                                            .chains
-                                            .get_chain(chain_name)
-                                            .await
-                                            .unwrap()
-                                            .chain_client;
-                                        debug!(
-                                            "checking task: {}",
-                                            &check_task.base_data.request_key
-                                        );
-                                        client
-                                            .process_check_task(&check_task, &state.storage)
-                                            .await
-                                            .ok();
+                                if let Ok(status) = state.storage.load_status(&request_key).await {
+                                    match status {
+                                        Status::Unsend => {
+                                            if let Ok(send_task) =
+                                                state.storage.load_send_task(&request_key).await
+                                            {
+                                                let chain_name =
+                                                    send_task.base_data.chain_name.as_ref();
+                                                let mut client = state
+                                                    .chains
+                                                    .get_chain(chain_name)
+                                                    .await
+                                                    .unwrap()
+                                                    .chain_client;
+                                                let _ = client
+                                                    .process_send_task(&send_task, &state.storage)
+                                                    .await;
+                                            }
+                                        }
+                                        Status::Uncheck => {
+                                            if let Ok(check_task) =
+                                                state.storage.load_check_task(&request_key).await
+                                            {
+                                                let chain_name =
+                                                    check_task.base_data.chain_name.as_ref();
+                                                let mut client = state
+                                                    .chains
+                                                    .get_chain(chain_name)
+                                                    .await
+                                                    .unwrap()
+                                                    .chain_client;
+                                                debug!(
+                                                    "checking task: {}",
+                                                    &check_task.base_data.request_key
+                                                );
+                                                client
+                                                    .process_check_task(&check_task, &state.storage)
+                                                    .await
+                                                    .ok();
+                                            }
+                                        }
                                     }
                                 }
                                 state.processing_lock.unlock_task(&request_key).await;

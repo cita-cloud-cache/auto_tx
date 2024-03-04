@@ -1,22 +1,25 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Arc};
 
 use crate::{kms::Account, send_tx::types::*};
 use color_eyre::eyre::{eyre, Result};
 use etcd_client::{Client, GetOptions, PutOptions};
 use paste::paste;
+use tokio::sync::RwLock;
 
 #[derive(Clone)]
 pub struct Storage {
-    operator: Client,
+    operator: Arc<RwLock<Client>>,
 }
 
 impl Storage {
     pub async fn new(endpoints: Vec<String>) -> Self {
         info!(" etcd endpoints: {:?}", endpoints);
-        let operator = Client::connect(&endpoints, None)
-            .await
-            .map_err(|e| println!("etcd connect failed: {e}"))
-            .unwrap();
+        let operator = Arc::new(RwLock::new(
+            Client::connect(&endpoints, None)
+                .await
+                .map_err(|e| println!("etcd connect failed: {e}"))
+                .unwrap(),
+        ));
         Self { operator }
     }
 
@@ -26,7 +29,7 @@ impl Storage {
         value: impl Into<Vec<u8>>,
         ttl: i64,
     ) -> Result<()> {
-        let mut storage = self.operator.clone();
+        let mut storage = self.operator.write().await;
         let lease = storage.lease_grant(ttl, None).await?;
         let option = PutOptions::new().with_lease(lease.id());
         storage.put(key, value, Some(option)).await?;
@@ -34,7 +37,7 @@ impl Storage {
     }
 
     pub async fn get(&self, key: impl Into<Vec<u8>>) -> Result<Vec<u8>> {
-        let mut storage = self.operator.clone();
+        let mut storage = self.operator.write().await;
         let data_vec = storage.get(key, None).await?;
         if let Some(kv) = data_vec.kvs().first() {
             Ok(kv.value().to_vec())
@@ -50,19 +53,21 @@ macro_rules! store_and_load {
             impl Storage {
                 pub($vis) async fn [<store_$var_name>](&self, request_key: &str, data: &$data_type) -> Result<()> {
                     let data_vec = bincode::serialize(&data)?;
-                    let path = format!("{}/{}/{}/{}", crate::config::CONFIG.get().unwrap().name, $dir, request_key, stringify!($var_name));
+                    let path = format!("{}/{}/{}/{}", crate::config::get_config().name, $dir, request_key, stringify!($var_name));
                     self.operator
-                        .clone()
+                        .write()
+                        .await
                         .put(path, data_vec, None)
                         .await
                         .map_err(|e| eyre!(e.to_string())).map(|_| ())
                 }
 
                 pub($vis) async fn [<load_$var_name>](&self, request_key: &str) -> Result<$data_type> {
-                    let path = format!("{}/{}/{}/{}", crate::config::CONFIG.get().unwrap().name, $dir, request_key, stringify!($var_name));
+                    let path = format!("{}/{}/{}/{}", crate::config::get_config().name, $dir, request_key, stringify!($var_name));
                     let data_vec = self
                         .operator
-                        .clone()
+                        .write()
+                        .await
                         .get(path, None)
                         .await
                         .map_err(|e| eyre!(e.to_string()))?;
@@ -76,9 +81,10 @@ macro_rules! store_and_load {
 
                 #[allow(unused)]
                 async fn [<delete_$var_name>](&self, request_key: &str) -> Result<()> {
-                    let path = format!("{}/{}/{}/{}", crate::config::CONFIG.get().unwrap().name, $dir, request_key, stringify!($var_name));
+                    let path = format!("{}/{}/{}/{}", crate::config::get_config().name, $dir, request_key, stringify!($var_name));
                     self.operator
-                        .clone()
+                        .write()
+                        .await
                         .delete(path, None)
                         .await
                         .map_err(|e| eyre!(e.to_string())).map(|_| ())
@@ -180,9 +186,10 @@ impl Storage {
         let option = GetOptions::new().with_prefix();
         let entries = self
             .operator
-            .clone()
+            .write()
+            .await
             .get(
-                format!("{}/processing/", crate::config::CONFIG.get().unwrap().name),
+                format!("{}/processing/", crate::config::get_config().name),
                 Some(option),
             )
             .await?;

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use crate::{
-    config::CONFIG,
+    config::get_config,
     send_tx::{cita::CitaClient, cita_cloud::CitaCloudClient, eth::EthClient},
 };
 use color_eyre::eyre::{eyre, Result};
@@ -131,7 +131,7 @@ impl Chains {
     }
 
     async fn request_chain_info(&self, chain_name: &str) -> Result<Chain> {
-        let key = format!("{}/ChainInfo/{}", CONFIG.get().unwrap().name, chain_name);
+        let key = format!("{}/ChainInfo/{}", get_config().name, chain_name);
         let kv = self.config_center.get(key).await?;
         let chain_info: ChainInfo = serde_json::from_str(kv.value_str()?)?;
         Chain::new(chain_name, chain_info).await

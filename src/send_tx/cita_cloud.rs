@@ -1,5 +1,5 @@
 use super::{types::*, AutoTx, BASE_QUOTA, DEFAULT_QUOTA, DEFAULT_QUOTA_LIMIT, RPC_TIMEOUT};
-use crate::config::CONFIG;
+use crate::config::get_config;
 use crate::kms::{Account, Kms};
 use crate::storage::Storage;
 use cita_cloud_proto::blockchain::{
@@ -48,7 +48,7 @@ async fn get_raw_tx(
     // get hash
     let tx_bytes = {
         let mut buf = Vec::with_capacity(cita_cloud_tx.encoded_len());
-        cita_cloud_tx.encode(&mut buf).unwrap();
+        cita_cloud_tx.encode(&mut buf)?;
         buf
     };
     let hash_vec = account.hash(&tx_bytes);
@@ -122,11 +122,7 @@ impl CitaCloudClient {
     }
 
     async fn get_system_config(&mut self, storage: Option<&Storage>) -> Result<SystemConfig> {
-        let key = format!(
-            "{}/ChainSysConfig/{}",
-            CONFIG.get().unwrap().name,
-            self.chain_name
-        );
+        let key = format!("{}/ChainSysConfig/{}", get_config().name, self.chain_name);
         if let Some(storage) = storage {
             if let Ok(system_config_bytes) = storage.get(key.clone()).await {
                 let system_config = SystemConfig::decode::<std::collections::VecDeque<u8>>(
@@ -143,7 +139,7 @@ impl CitaCloudClient {
         if let Some(storage) = storage {
             let system_config_bytes = {
                 let mut buf = Vec::with_capacity(system_config.encoded_len());
-                system_config.encode(&mut buf).unwrap();
+                system_config.encode(&mut buf)?;
                 buf
             };
             storage

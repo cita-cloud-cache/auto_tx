@@ -1,5 +1,5 @@
 use super::{types::*, AutoTx, DEFAULT_QUOTA};
-use crate::config::CONFIG;
+use crate::config::get_config;
 use crate::kms::Account;
 use crate::storage::Storage;
 use color_eyre::eyre::{eyre, Result};
@@ -58,7 +58,7 @@ impl EthClient {
     pub async fn get_gas_limit(&self, storage: Option<&Storage>) -> Result<u64> {
         let key = format!(
             "{}/ChainSysConfig/{}/gas_limit",
-            CONFIG.get().unwrap().name,
+            get_config().name,
             self.chain_name
         );
         if let Some(storage) = storage {

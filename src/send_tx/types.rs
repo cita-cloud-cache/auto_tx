@@ -26,7 +26,7 @@ impl Display for TxData {
         };
 
         let value_str = hex::encode(self.value.0.clone());
-        let display_value = display_value(&value_str).unwrap();
+        let display_value = display_value(&value_str).unwrap_or_default();
 
         write!(
             f,

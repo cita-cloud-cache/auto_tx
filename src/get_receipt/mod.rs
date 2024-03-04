@@ -1,6 +1,6 @@
 use crate::{send_tx::AutoTx, AutoTxGlobalState};
 
-use color_eyre::eyre::{eyre, Result};
+use color_eyre::eyre::{eyre, OptionExt, Result};
 use common_rs::{
     error::CALError,
     restful::{ok, RESTfulError},
@@ -10,8 +10,10 @@ use std::sync::Arc;
 
 #[handler]
 pub async fn get_receipt(depot: &Depot, req: &Request) -> Result<impl Writer, RESTfulError> {
-    let hash = req.param::<String>("hash").unwrap();
-    let chain_name = req.param::<String>("chain_name").unwrap();
+    let hash = req.param::<String>("hash").ok_or_eyre("hash is missing")?;
+    let chain_name = req
+        .param::<String>("chain_name")
+        .ok_or_eyre("chain_name is missing")?;
 
     let state = depot
         .obtain::<Arc<AutoTxGlobalState>>()
