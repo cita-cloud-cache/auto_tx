@@ -195,7 +195,7 @@ impl Storage {
             .await?;
         let mut result = HashSet::new();
         for e in entries.kvs().iter() {
-            if let Some(key) = e.key_str()?.split('/').take(2).last() {
+            if let Some(key) = e.key_str()?.split('/').take(3).last() {
                 result.insert(key.to_owned());
             }
         }

@@ -242,6 +242,8 @@ async fn run(opts: RunOpts) -> Result<()> {
                                             }
                                         }
                                     }
+                                } else {
+                                    error!("load_status failed: {}", request_key);
                                 }
                                 state.processing_lock.unlock_task(&request_key).await;
                             });
