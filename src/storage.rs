@@ -1,25 +1,23 @@
-use std::{collections::HashSet, sync::Arc};
+use core::time;
+use std::collections::HashSet;
 
 use crate::{kms::Account, send_tx::types::*};
 use color_eyre::eyre::{eyre, Result};
-use etcd_client::{Client, GetOptions, PutOptions};
+use etcd_client::{Client, GetOptions, LockOptions, PutOptions};
 use paste::paste;
-use tokio::sync::RwLock;
 
 #[derive(Clone)]
 pub struct Storage {
-    operator: Arc<RwLock<Client>>,
+    operator: Client,
 }
 
 impl Storage {
     pub async fn new(endpoints: Vec<String>) -> Self {
         info!(" etcd endpoints: {:?}", endpoints);
-        let operator = Arc::new(RwLock::new(
-            Client::connect(&endpoints, None)
-                .await
-                .map_err(|e| println!("etcd connect failed: {e}"))
-                .unwrap(),
-        ));
+        let operator = Client::connect(&endpoints, None)
+            .await
+            .map_err(|e| println!("etcd connect failed: {e}"))
+            .unwrap();
         Self { operator }
     }
 
@@ -29,7 +27,7 @@ impl Storage {
         value: impl Into<Vec<u8>>,
         ttl: i64,
     ) -> Result<()> {
-        let mut storage = self.operator.write().await;
+        let mut storage = self.operator.clone();
         let lease = storage.lease_grant(ttl, None).await?;
         let option = PutOptions::new().with_lease(lease.id());
         storage.put(key, value, Some(option)).await?;
@@ -37,7 +35,7 @@ impl Storage {
     }
 
     pub async fn get(&self, key: impl Into<Vec<u8>>) -> Result<Vec<u8>> {
-        let mut storage = self.operator.write().await;
+        let mut storage = self.operator.clone();
         let data_vec = storage.get(key, None).await?;
         if let Some(kv) = data_vec.kvs().first() {
             Ok(kv.value().to_vec())
@@ -55,8 +53,7 @@ macro_rules! store_and_load {
                     let data_vec = bincode::serialize(&data)?;
                     let path = format!("{}/{}/{}/{}", crate::config::get_config().name, $dir, request_key, stringify!($var_name));
                     self.operator
-                        .write()
-                        .await
+                        .clone()
                         .put(path, data_vec, None)
                         .await
                         .map_err(|e| eyre!(e.to_string())).map(|_| ())
@@ -66,8 +63,7 @@ macro_rules! store_and_load {
                     let path = format!("{}/{}/{}/{}", crate::config::get_config().name, $dir, request_key, stringify!($var_name));
                     let data_vec = self
                         .operator
-                        .write()
-                        .await
+                        .clone()
                         .get(path, None)
                         .await
                         .map_err(|e| eyre!(e.to_string()))?;
@@ -83,8 +79,7 @@ macro_rules! store_and_load {
                 async fn [<delete_$var_name>](&self, request_key: &str) -> Result<()> {
                     let path = format!("{}/{}/{}/{}", crate::config::get_config().name, $dir, request_key, stringify!($var_name));
                     self.operator
-                        .write()
-                        .await
+                        .clone()
                         .delete(path, None)
                         .await
                         .map_err(|e| eyre!(e.to_string())).map(|_| ())
@@ -186,8 +181,7 @@ impl Storage {
         let option = GetOptions::new().with_prefix();
         let entries = self
             .operator
-            .write()
-            .await
+            .clone()
             .get(
                 format!("{}/processing/", crate::config::get_config().name),
                 Some(option),
@@ -201,5 +195,30 @@ impl Storage {
         }
 
         Ok(result.into_iter().collect())
+    }
+
+    pub async fn try_lock_task(&self, request_key: &str) -> Result<Vec<u8>> {
+        let mut write = self.operator.clone();
+        let lease = write
+            .lease_grant(crate::config::get_config().max_timeout.into(), None)
+            .await?;
+        let option = LockOptions::new().with_lease(lease.id());
+        let key = format!(
+            "{}/locked_task/{}",
+            crate::config::get_config().name,
+            request_key
+        );
+        let time_out = time::Duration::from_secs(1);
+        let lock_key = tokio::time::timeout(time_out, write.lock(key, Some(option)))
+            .await??
+            .key()
+            .to_vec();
+        Ok(lock_key)
+    }
+
+    pub async fn unlock_task(&self, lock_key: &[u8]) -> Result<()> {
+        let mut write = self.operator.clone();
+        write.unlock(lock_key).await?;
+        Ok(())
     }
 }

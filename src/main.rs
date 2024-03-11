@@ -46,9 +46,8 @@ use config::{CitaCreateConfig, Config};
 use salvo::prelude::*;
 use send_tx::handle_send_tx;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashSet, sync::Arc};
+use std::sync::Arc;
 use storage::Storage;
-use tokio::sync::RwLock;
 
 /// A subcommand for run
 #[derive(Parser)]
@@ -93,40 +92,12 @@ fn main() {
     }
 }
 
-struct ProcessingLock {
-    lock: RwLock<HashSet<String>>,
-}
-
-impl ProcessingLock {
-    fn new() -> Self {
-        Self {
-            lock: RwLock::new(HashSet::new()),
-        }
-    }
-
-    async fn is_processing(&self, request_key: &str) -> bool {
-        let read = self.lock.read().await;
-        read.contains(request_key)
-    }
-
-    async fn lock_task(&self, request_key: &str) {
-        let mut write = self.lock.write().await;
-        write.insert(request_key.to_owned());
-    }
-
-    async fn unlock_task(&self, request_key: &str) {
-        let mut write = self.lock.write().await;
-        write.remove(request_key);
-    }
-}
-
 #[derive(Clone)]
 pub struct AutoTxGlobalState {
     chains: Chains,
     storage: Storage,
     max_timeout: u32,
     cita_create_config: Option<CitaCreateConfig>,
-    processing_lock: Arc<ProcessingLock>,
     fast_mode: bool,
 }
 
@@ -137,7 +108,6 @@ impl AutoTxGlobalState {
             storage: Storage::new(config.etcd_endpoints).await,
             max_timeout: config.max_timeout,
             cita_create_config: config.cita_create_config,
-            processing_lock: Arc::new(ProcessingLock::new()),
             fast_mode: config.fast_mode,
         }
     }
@@ -193,9 +163,8 @@ async fn run(opts: RunOpts) -> Result<()> {
                     for request_key in processing {
                         let state = state.clone();
 
-                        if !state.processing_lock.is_processing(&request_key).await {
+                        if let Ok(lock_key) = state.storage.try_lock_task(&request_key).await {
                             tokio::spawn(async move {
-                                state.processing_lock.lock_task(&request_key).await;
                                 if let Ok(status) = state.storage.load_status(&request_key).await {
                                     match status {
                                         Status::Unsend => {
@@ -204,15 +173,18 @@ async fn run(opts: RunOpts) -> Result<()> {
                                             {
                                                 let chain_name =
                                                     send_task.base_data.chain_name.as_ref();
-                                                let mut client = state
-                                                    .chains
-                                                    .get_chain(chain_name)
-                                                    .await
-                                                    .unwrap()
-                                                    .chain_client;
-                                                let _ = client
-                                                    .process_send_task(&send_task, &state.storage)
-                                                    .await;
+                                                if let Ok(mut chain) =
+                                                    state.chains.get_chain(chain_name).await
+                                                {
+                                                    chain
+                                                        .chain_client
+                                                        .process_send_task(
+                                                            &send_task,
+                                                            &state.storage,
+                                                        )
+                                                        .await
+                                                        .ok();
+                                                }
                                             }
                                         }
                                         Status::Uncheck => {
@@ -221,27 +193,27 @@ async fn run(opts: RunOpts) -> Result<()> {
                                             {
                                                 let chain_name =
                                                     check_task.base_data.chain_name.as_ref();
-                                                let mut client = state
-                                                    .chains
-                                                    .get_chain(chain_name)
-                                                    .await
-                                                    .unwrap()
-                                                    .chain_client;
-                                                debug!(
-                                                    "checking task: {}",
-                                                    &check_task.base_data.request_key
-                                                );
-                                                client
-                                                    .process_check_task(&check_task, &state.storage)
-                                                    .await
-                                                    .ok();
+                                                if let Ok(mut chain) =
+                                                    state.chains.get_chain(chain_name).await
+                                                {
+                                                    debug!(
+                                                        "checking task: {}",
+                                                        &check_task.base_data.request_key
+                                                    );
+                                                    chain
+                                                        .chain_client
+                                                        .process_check_task(
+                                                            &check_task,
+                                                            &state.storage,
+                                                        )
+                                                        .await
+                                                        .ok();
+                                                }
                                             }
                                         }
                                     }
-                                } else {
-                                    error!("load_status failed: {}", request_key);
                                 }
-                                state.processing_lock.unlock_task(&request_key).await;
+                                state.storage.unlock_task(&lock_key).await.ok();
                             });
                         }
                     }

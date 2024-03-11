@@ -237,13 +237,16 @@ pub async fn handle(
     };
 
     let hash = {
-        state.processing_lock.lock_task(&request_key).await;
-        let hash = chain
-            .chain_client
-            .process_send_task(&send_task, &state.storage)
-            .await?;
-        state.processing_lock.unlock_task(&request_key).await;
-        hash
+        if let Ok(lock_key) = state.storage.try_lock_task(&request_key).await {
+            let hash = chain
+                .chain_client
+                .process_send_task(&send_task, &state.storage)
+                .await?;
+            state.storage.unlock_task(&lock_key).await.ok();
+            hash
+        } else {
+            return err(CALError::InternalServerError, "task locked");
+        }
     };
 
     info!(
