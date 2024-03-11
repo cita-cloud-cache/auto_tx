@@ -178,7 +178,8 @@ impl Storage {
     }
 
     pub async fn get_processing_tasks(&self) -> Result<Vec<String>> {
-        let option = GetOptions::new().with_prefix();
+        // add limit for OutOfRange error
+        let option = GetOptions::new().with_prefix().with_limit(1024 * 4);
         let entries = self
             .operator
             .clone()
