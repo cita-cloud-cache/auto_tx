@@ -143,7 +143,7 @@ impl CitaCloudClient {
                 buf
             };
             storage
-                .put_with_lease(key, system_config_bytes, 3)
+                .put_with_lease(key, system_config_bytes, get_config().chain_config_ttl)
                 .await
                 .ok();
         }

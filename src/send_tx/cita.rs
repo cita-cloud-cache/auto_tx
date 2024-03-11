@@ -92,7 +92,7 @@ impl CitaClient {
         if let Some(storage) = storage {
             let block_interval_bytes = block_interval.to_be_bytes();
             storage
-                .put_with_lease(key, block_interval_bytes, 3)
+                .put_with_lease(key, block_interval_bytes, get_config().chain_config_ttl)
                 .await
                 .ok();
         }
@@ -138,7 +138,10 @@ impl CitaClient {
         };
         if let Some(storage) = storage {
             let gas_limit_bytes = gas_limit.to_be_bytes();
-            storage.put_with_lease(key, gas_limit_bytes, 3).await.ok();
+            storage
+                .put_with_lease(key, gas_limit_bytes, get_config().chain_config_ttl)
+                .await
+                .ok();
         }
         Ok(gas_limit)
     }
@@ -161,7 +164,10 @@ impl CitaClient {
             .map_err(|_| eyre!("get_version failed"))?;
         if let Some(storage) = storage {
             let version_bytes = version.to_be_bytes();
-            storage.put_with_lease(key, version_bytes, 3).await.ok();
+            storage
+                .put_with_lease(key, version_bytes, get_config().chain_config_ttl)
+                .await
+                .ok();
         }
         Ok(version)
     }
@@ -184,7 +190,10 @@ impl CitaClient {
             .map_err(|_| eyre!("get_chain_id failed"))?;
         if let Some(storage) = storage {
             let chain_id_bytes = chain_id.to_be_bytes();
-            storage.put_with_lease(key, chain_id_bytes, 3).await.ok();
+            storage
+                .put_with_lease(key, chain_id_bytes, get_config().chain_config_ttl)
+                .await
+                .ok();
         }
         Ok(chain_id)
     }
@@ -206,7 +215,10 @@ impl CitaClient {
                 .completed_lower_hex(),
         )?;
         if let Some(storage) = storage {
-            storage.put_with_lease(key, chain_id.clone(), 3).await.ok();
+            storage
+                .put_with_lease(key, chain_id.clone(), get_config().chain_config_ttl)
+                .await
+                .ok();
         }
         Ok(chain_id)
     }

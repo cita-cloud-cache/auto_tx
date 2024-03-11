@@ -78,7 +78,10 @@ impl EthClient {
         .as_u64();
         if let Some(storage) = storage {
             let gas_limit_bytes = gas_limit.to_be_bytes();
-            storage.put_with_lease(key, gas_limit_bytes, 3).await.ok();
+            storage
+                .put_with_lease(key, gas_limit_bytes, get_config().chain_config_ttl)
+                .await
+                .ok();
         }
         Ok(gas_limit)
     }

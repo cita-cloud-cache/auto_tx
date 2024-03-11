@@ -45,16 +45,22 @@ pub struct CitaCreateConfig {
 #[serde(default)]
 pub struct Config {
     pub name: String,
+
     pub port: u16,
 
     pub kms_url: String,
 
     pub log_config: LogConfig,
+
     pub process_interval: u64,
 
     pub fast_mode: bool,
+
     pub max_timeout: u32,
+
     pub etcd_endpoints: Vec<String>,
+
+    pub chain_config_ttl: i64,
 
     pub cita_create_config: Option<CitaCreateConfig>,
 
@@ -66,18 +72,14 @@ impl Default for Config {
         Self {
             name: "auto_tx".to_string(),
             port: 3000,
-
             kms_url: Default::default(),
-
             log_config: Default::default(),
             max_timeout: 600,
             process_interval: 5,
             etcd_endpoints: vec!["127.0.0.1:2379".to_string()],
-
+            chain_config_ttl: 3,
             cita_create_config: None,
-
             service_register_config: Default::default(),
-
             fast_mode: false,
         }
     }
