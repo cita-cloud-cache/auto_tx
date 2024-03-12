@@ -1,7 +1,7 @@
 use core::time;
 use std::{collections::HashSet, time::Duration};
 
-use crate::{kms::Account, send_tx::types::*};
+use crate::{config::get_config, kms::Account, send_tx::types::*};
 use color_eyre::eyre::{eyre, Result};
 use etcd_client::{Client, ConnectOptions, GetOptions, LockOptions, PutOptions};
 use paste::paste;
@@ -60,7 +60,7 @@ macro_rules! store_and_load {
             impl Storage {
                 pub($vis) async fn [<store_$var_name>](&self, request_key: &str, data: &$data_type) -> Result<()> {
                     let data_vec = bincode::serialize(&data)?;
-                    let path = format!("{}/{}/{}/{}", crate::config::get_config().name, $dir, request_key, stringify!($var_name));
+                    let path = format!("{}/{}/{}/{}", get_config().name, $dir, request_key, stringify!($var_name));
                     self.operator
                         .clone()
                         .put(path, data_vec, None)
@@ -69,7 +69,7 @@ macro_rules! store_and_load {
                 }
 
                 pub($vis) async fn [<load_$var_name>](&self, request_key: &str) -> Result<$data_type> {
-                    let path = format!("{}/{}/{}/{}", crate::config::get_config().name, $dir, request_key, stringify!($var_name));
+                    let path = format!("{}/{}/{}/{}", get_config().name, $dir, request_key, stringify!($var_name));
                     let data_vec = self
                         .operator
                         .clone()
@@ -86,7 +86,7 @@ macro_rules! store_and_load {
 
                 #[allow(unused)]
                 async fn [<delete_$var_name>](&self, request_key: &str) -> Result<()> {
-                    let path = format!("{}/{}/{}/{}", crate::config::get_config().name, $dir, request_key, stringify!($var_name));
+                    let path = format!("{}/{}/{}/{}", get_config().name, $dir, request_key, stringify!($var_name));
                     self.operator
                         .clone()
                         .delete(path, None)
@@ -187,15 +187,16 @@ impl Storage {
     }
 
     pub async fn get_processing_tasks(&self) -> Result<Vec<String>> {
+        let config = get_config();
         // add limit for OutOfRange error
-        let option = GetOptions::new().with_prefix().with_limit(1024 * 4);
+        let option = GetOptions::new()
+            .with_prefix()
+            .with_keys_only()
+            .with_limit(config.etcd_get_limit);
         let entries = self
             .operator
             .clone()
-            .get(
-                format!("{}/processing/", crate::config::get_config().name),
-                Some(option),
-            )
+            .get(format!("{}/processing/", config.name), Some(option))
             .await?;
         let mut result = HashSet::new();
         for e in entries.kvs().iter() {
@@ -208,21 +209,18 @@ impl Storage {
     }
 
     pub async fn try_lock_task(&self, request_key: &str) -> Result<Vec<u8>> {
+        let config = get_config();
         let mut write = self.operator.clone();
-        let lease = write
-            .lease_grant(crate::config::get_config().max_timeout.into(), None)
-            .await?;
+        let lease = write.lease_grant(config.max_timeout.into(), None).await?;
         let option = LockOptions::new().with_lease(lease.id());
-        let key = format!(
-            "{}/locked_task/{}",
-            crate::config::get_config().name,
-            request_key
-        );
-        let time_out = time::Duration::from_secs(1);
-        let lock_key = tokio::time::timeout(time_out, write.lock(key, Some(option)))
-            .await??
-            .key()
-            .to_vec();
+        let key = format!("{}/locked_task/{}", config.name, request_key);
+        let lock_key = tokio::time::timeout(
+            time::Duration::from_millis(config.rpc_timeout),
+            write.lock(key, Some(option)),
+        )
+        .await??
+        .key()
+        .to_vec();
         Ok(lock_key)
     }
 

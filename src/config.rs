@@ -60,7 +60,11 @@ pub struct Config {
 
     pub etcd_endpoints: Vec<String>,
 
+    pub etcd_get_limit: i64,
+
     pub chain_config_ttl: i64,
+
+    pub rpc_timeout: u64,
 
     pub cita_create_config: Option<CitaCreateConfig>,
 
@@ -77,7 +81,9 @@ impl Default for Config {
             max_timeout: 600,
             process_interval: 5,
             etcd_endpoints: vec!["127.0.0.1:2379".to_string()],
+            etcd_get_limit: 20480,
             chain_config_ttl: 3,
+            rpc_timeout: 1000,
             cita_create_config: None,
             service_register_config: Default::default(),
             fast_mode: false,

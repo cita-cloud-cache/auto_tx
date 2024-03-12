@@ -1,4 +1,4 @@
-use super::{types::*, AutoTx, BASE_QUOTA, DEFAULT_QUOTA, DEFAULT_QUOTA_LIMIT, RPC_TIMEOUT};
+use super::{types::*, AutoTx, BASE_QUOTA, DEFAULT_QUOTA, DEFAULT_QUOTA_LIMIT};
 use crate::config::get_config;
 use crate::kms::{Account, Kms};
 use crate::storage::Storage;
@@ -229,7 +229,7 @@ impl CitaCloudClient {
                     height: 0,
                 };
                 let estimate_quota_timeout = tokio::time::timeout(
-                    std::time::Duration::from_secs(RPC_TIMEOUT),
+                    std::time::Duration::from_millis(get_config().rpc_timeout),
                     self.estimate_quota(call),
                 );
                 match estimate_quota_timeout.await {
@@ -381,7 +381,7 @@ impl AutoTx for CitaCloudClient {
         let hash_str = hash.encode_hex::<String>();
         let request_key = &check_task.base_data.request_key;
         let get_transaction_receipt_timeout = tokio::time::timeout(
-            std::time::Duration::from_secs(RPC_TIMEOUT),
+            std::time::Duration::from_millis(get_config().rpc_timeout),
             self.get_transaction_receipt(Hash { hash }),
         );
         match get_transaction_receipt_timeout.await {

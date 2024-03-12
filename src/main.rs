@@ -163,11 +163,13 @@ async fn run(opts: RunOpts) -> Result<()> {
                     for request_key in processing {
                         let state = state.clone();
 
-                        if let Ok(lock_key) = state.storage.try_lock_task(&request_key).await {
-                            tokio::spawn(async move {
-                                if let Ok(status) = state.storage.load_status(&request_key).await {
-                                    match status {
-                                        Status::Unsend => {
+                        if let Ok(status) = state.storage.load_status(&request_key).await {
+                            match status {
+                                Status::Unsend => {
+                                    tokio::spawn(async move {
+                                        if let Ok(lock_key) =
+                                            state.storage.try_lock_task(&request_key).await
+                                        {
                                             if let Ok(send_task) =
                                                 state.storage.load_send_task(&request_key).await
                                             {
@@ -186,35 +188,34 @@ async fn run(opts: RunOpts) -> Result<()> {
                                                         .ok();
                                                 }
                                             }
+                                            state.storage.unlock_task(&lock_key).await.ok();
                                         }
-                                        Status::Uncheck => {
-                                            if let Ok(check_task) =
-                                                state.storage.load_check_task(&request_key).await
+                                    });
+                                }
+                                Status::Uncheck => {
+                                    tokio::spawn(async move {
+                                        if let Ok(check_task) =
+                                            state.storage.load_check_task(&request_key).await
+                                        {
+                                            let chain_name =
+                                                check_task.base_data.chain_name.as_ref();
+                                            if let Ok(mut chain) =
+                                                state.chains.get_chain(chain_name).await
                                             {
-                                                let chain_name =
-                                                    check_task.base_data.chain_name.as_ref();
-                                                if let Ok(mut chain) =
-                                                    state.chains.get_chain(chain_name).await
-                                                {
-                                                    debug!(
-                                                        "checking task: {}",
-                                                        &check_task.base_data.request_key
-                                                    );
-                                                    chain
-                                                        .chain_client
-                                                        .process_check_task(
-                                                            &check_task,
-                                                            &state.storage,
-                                                        )
-                                                        .await
-                                                        .ok();
-                                                }
+                                                debug!(
+                                                    "checking task: {}",
+                                                    &check_task.base_data.request_key
+                                                );
+                                                chain
+                                                    .chain_client
+                                                    .process_check_task(&check_task, &state.storage)
+                                                    .await
+                                                    .ok();
                                             }
                                         }
-                                    }
+                                    });
                                 }
-                                state.storage.unlock_task(&lock_key).await.ok();
-                            });
+                            }
                         }
                     }
                 }
