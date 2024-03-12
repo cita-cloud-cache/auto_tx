@@ -215,6 +215,11 @@ pub async fn handle(
         },
         timeout,
     };
+    let lock_key = state
+        .storage
+        .try_lock_task(&request_key)
+        .await
+        .map_err(|e| eyre!("Duplicate Tx: {e}"))?;
     let (timeout, gas) = chain
         .chain_client
         .process_init_task(&init_task, &state.storage)
@@ -225,6 +230,7 @@ pub async fn handle(
             "receive send_tx request: request_key: {}, user_code: {}\n\tchain: {}\n\tfrom: {}, tx_data: {}\n\ttimeout: {}, gas: {}",
             request_key, user_code, chain, account.address_str(), tx_data, timeout, gas.gas
         );
+        state.storage.unlock_task(&lock_key).await.ok();
         return ok(json!({}));
     }
 
@@ -237,16 +243,12 @@ pub async fn handle(
     };
 
     let hash = {
-        if let Ok(lock_key) = state.storage.try_lock_task(&request_key).await {
-            let hash = chain
-                .chain_client
-                .process_send_task(&send_task, &state.storage)
-                .await?;
-            state.storage.unlock_task(&lock_key).await.ok();
-            hash
-        } else {
-            return err(CALError::InternalServerError, "task locked");
-        }
+        let hash = chain
+            .chain_client
+            .process_send_task(&send_task, &state.storage)
+            .await?;
+        state.storage.unlock_task(&lock_key).await.ok();
+        hash
     };
 
     info!(
