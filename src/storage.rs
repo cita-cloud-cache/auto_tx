@@ -1,9 +1,9 @@
 use core::time;
-use std::collections::HashSet;
+use std::{collections::HashSet, time::Duration};
 
 use crate::{kms::Account, send_tx::types::*};
 use color_eyre::eyre::{eyre, Result};
-use etcd_client::{Client, GetOptions, LockOptions, PutOptions};
+use etcd_client::{Client, ConnectOptions, GetOptions, LockOptions, PutOptions};
 use paste::paste;
 
 #[derive(Clone)]
@@ -14,10 +14,19 @@ pub struct Storage {
 impl Storage {
     pub async fn new(endpoints: Vec<String>) -> Self {
         info!(" etcd endpoints: {:?}", endpoints);
-        let operator = Client::connect(&endpoints, None)
-            .await
-            .map_err(|e| println!("etcd connect failed: {e}"))
-            .unwrap();
+        let operator = Client::connect(
+            &endpoints,
+            Some(
+                ConnectOptions::new()
+                    .with_connect_timeout(Duration::from_secs(2))
+                    .with_keep_alive(Duration::from_secs(300), Duration::from_secs(2))
+                    .with_keep_alive_while_idle(true)
+                    .with_timeout(Duration::from_secs(2)),
+            ),
+        )
+        .await
+        .map_err(|e| println!("etcd connect failed: {e}"))
+        .unwrap();
         Self { operator }
     }
 

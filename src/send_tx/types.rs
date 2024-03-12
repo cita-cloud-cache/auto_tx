@@ -148,12 +148,14 @@ pub struct SendData {
     pub tx_data: TxData,
 }
 
+#[derive(Debug)]
 pub struct InitTask {
     pub base_data: BaseData,
     pub send_data: SendData,
     pub timeout: u32,
 }
 
+#[derive(Debug)]
 pub struct SendTask {
     pub base_data: BaseData,
     pub send_data: SendData,
@@ -161,6 +163,7 @@ pub struct SendTask {
     pub gas: Gas,
 }
 
+#[derive(Debug)]
 pub struct CheckTask {
     pub base_data: BaseData,
     pub hash_to_check: HashToCheck,

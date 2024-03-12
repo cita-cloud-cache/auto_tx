@@ -17,7 +17,6 @@ use cita_cloud_proto::evm::{ByteQuota, Receipt};
 use cita_cloud_proto::executor::CallRequest;
 use cita_cloud_proto::retry::RetryClient;
 use color_eyre::eyre::{eyre, Result};
-use common_rs::error::CALError;
 use ethabi::ethereum_types::U256;
 use hex::ToHex;
 use prost::Message;
@@ -200,7 +199,7 @@ impl CitaCloudClient {
 
                 Ok(Timeout::Cita(timeout))
             }
-            (true, false) => Err(CALError::TransactionTimeout.into()),
+            (true, false) => Err(eyre!("timeout")),
             (false, _) => Ok(Timeout::Cita(timeout)),
         }
     }
@@ -271,6 +270,7 @@ impl AutoTx for CitaCloudClient {
         init_task: &InitTask,
         storage: &Storage,
     ) -> Result<(Timeout, Gas)> {
+        debug!("process_init_task: {:?}", init_task);
         // get timeout
         let timeout = Timeout::Cita(CitaTimeout {
             remain_time: init_task.timeout,
@@ -298,6 +298,7 @@ impl AutoTx for CitaCloudClient {
         send_task: &SendTask,
         storage: &Storage,
     ) -> Result<String> {
+        debug!("process_send_task: {:?}", send_task);
         // get tx
         let mut cita_cloud_tx = CitaCloudlTransaction::from(send_task);
         // update args
@@ -342,6 +343,7 @@ impl AutoTx for CitaCloudClient {
                 );
                 match self.try_update_timeout(timeout, storage).await {
                     Ok(new_timeout) => {
+                        debug!("{request_key} new_timeout: {new_timeout} ");
                         if timeout != new_timeout {
                             storage.store_timeout(request_key, &new_timeout).await?;
                             info!(
@@ -374,6 +376,7 @@ impl AutoTx for CitaCloudClient {
         check_task: &CheckTask,
         storage: &Storage,
     ) -> Result<AutoTxResult> {
+        debug!("process_check_task: {:?}", check_task);
         let hash = check_task.hash_to_check.hash.clone();
         let hash_str = hash.encode_hex::<String>();
         let request_key = &check_task.base_data.request_key;
