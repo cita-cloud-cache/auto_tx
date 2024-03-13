@@ -1,4 +1,3 @@
-use core::time;
 use std::{collections::HashSet, time::Duration};
 
 use crate::{config::get_config, kms::Account, send_tx::types::*};
@@ -18,10 +17,13 @@ impl Storage {
             &endpoints,
             Some(
                 ConnectOptions::new()
-                    .with_connect_timeout(Duration::from_secs(2))
-                    .with_keep_alive(Duration::from_secs(300), Duration::from_secs(2))
+                    .with_connect_timeout(Duration::from_secs(get_config().rpc_timeout))
+                    .with_keep_alive(
+                        Duration::from_secs(300),
+                        Duration::from_secs(get_config().rpc_timeout),
+                    )
                     .with_keep_alive_while_idle(true)
-                    .with_timeout(Duration::from_secs(2)),
+                    .with_timeout(Duration::from_secs(get_config().rpc_timeout)),
             ),
         )
         .await
@@ -214,13 +216,7 @@ impl Storage {
         let lease = write.lease_grant(config.max_timeout.into(), None).await?;
         let option = LockOptions::new().with_lease(lease.id());
         let key = format!("{}/locked_task/{}", config.name, request_key);
-        let lock_key = tokio::time::timeout(
-            time::Duration::from_millis(config.rpc_timeout),
-            write.lock(key, Some(option)),
-        )
-        .await??
-        .key()
-        .to_vec();
+        let lock_key = write.lock(key, Some(option)).await?.key().to_vec();
         Ok(lock_key)
     }
 
