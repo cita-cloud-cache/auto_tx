@@ -126,6 +126,11 @@ pub struct Gas {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RawTransactionBytes {
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HashToCheck {
     pub hash: Vec<u8>,
 }

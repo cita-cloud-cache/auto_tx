@@ -31,7 +31,7 @@ pub trait AutoTx {
         &mut self,
         init_task: &InitTask,
         storage: &Storage,
-    ) -> Result<(Timeout, Gas)>;
+    ) -> Result<(String, Timeout, Gas)>;
 
     async fn process_send_task(
         &mut self,
@@ -53,7 +53,7 @@ impl AutoTx for ChainClient {
         &mut self,
         init_task: &InitTask,
         storage: &Storage,
-    ) -> Result<(Timeout, Gas)> {
+    ) -> Result<(String, Timeout, Gas)> {
         match self {
             ChainClient::CitaCloud(client) => client.process_init_task(init_task, storage).await,
             ChainClient::Cita(client) => client.process_init_task(init_task, storage).await,
@@ -214,48 +214,18 @@ pub async fn handle(
         },
         timeout,
     };
-    let lock_key = state
-        .storage
-        .try_lock_task(&request_key)
-        .await
-        .map_err(|e| eyre!("Duplicate Tx: {e}"))?;
-    let (timeout, gas) = chain
+
+    let (tx_hash, timeout, gas) = chain
         .chain_client
         .process_init_task(&init_task, &state.storage)
         .await?;
 
-    if state.fast_mode {
-        info!(
-            "receive send_tx request: request_key: {}, user_code: {}\n\tchain: {}\n\tfrom: {}, tx_data: {}\n\ttimeout: {}, gas: {}",
-            request_key, user_code, chain, account.address_str(), tx_data, timeout, gas.gas
-        );
-        state.storage.unlock_task(&lock_key).await.ok();
-        return ok(json!({}));
-    }
-
-    // optim: not read from storage
-    let send_task = SendTask {
-        base_data: init_task.base_data,
-        send_data: init_task.send_data,
-        timeout,
-        gas,
-    };
-
-    let hash = {
-        let hash = chain
-            .chain_client
-            .process_send_task(&send_task, &state.storage)
-            .await?;
-        state.storage.unlock_task(&lock_key).await.ok();
-        hash
-    };
-
     info!(
         "receive send_tx request: request_key: {}, user_code: {}\n\tchain: {}\n\tfrom: {}, tx_data: {}\n\ttimeout: {}, gas: {}\n\tinitial hash: 0x{}",
-        request_key, user_code, chain, account.address_str(), tx_data, timeout, gas.gas, hash.clone()
+        request_key, user_code, chain, account.address_str(), tx_data, timeout, gas.gas, tx_hash
     );
 
     ok(json!({
-        "hash": add_0x(hash)
+        "hash": add_0x(tx_hash)
     }))
 }

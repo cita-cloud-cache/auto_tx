@@ -98,7 +98,6 @@ pub struct AutoTxGlobalState {
     storage: Storage,
     max_timeout: u32,
     cita_create_config: Option<CitaCreateConfig>,
-    fast_mode: bool,
 }
 
 impl AutoTxGlobalState {
@@ -108,7 +107,6 @@ impl AutoTxGlobalState {
             storage: Storage::new(config.etcd_endpoints).await,
             max_timeout: config.max_timeout,
             cita_create_config: config.cita_create_config,
-            fast_mode: config.fast_mode,
         }
     }
 }

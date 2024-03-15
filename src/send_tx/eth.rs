@@ -161,7 +161,7 @@ impl AutoTx for EthClient {
         &mut self,
         init_task: &InitTask,
         storage: &Storage,
-    ) -> Result<(Timeout, Gas)> {
+    ) -> Result<(String, Timeout, Gas)> {
         // get timeout
         let timeout = Timeout::Eth(EthTimeout {
             nonce: U256::default(),
@@ -171,15 +171,37 @@ impl AutoTx for EthClient {
 
         // get Gas
         let gas = self.estimate_gas(init_task.send_data.clone()).await;
+        // get tx
+        let eth_tx = TransactionParameters::from(&SendTask {
+            base_data: init_task.base_data.clone(),
+            send_data: init_task.send_data.clone(),
+            timeout,
+            gas,
+        });
+
+        // get signed
+        let account = init_task.send_data.account.clone();
+        let signed_tx = self.sign_transaction(eth_tx, account.clone()).await?;
+        // get tx_hash
+        let tx_hash = signed_tx.transaction_hash.0;
+        let tx_hash_str = tx_hash.encode_hex::<String>();
 
         // store all
         let request_key = &init_task.base_data.request_key;
 
+        storage
+            .store_raw_transaction_bytes(
+                request_key,
+                &RawTransactionBytes {
+                    bytes: signed_tx.raw_transaction.0,
+                },
+            )
+            .await?;
         storage.store_timeout(request_key, &timeout).await?;
         storage.store_gas(request_key, &gas).await?;
         storage.store_init_task(request_key, init_task).await?;
 
-        Ok((timeout, gas))
+        Ok((tx_hash_str, timeout, gas))
     }
 
     async fn process_send_task(
@@ -187,16 +209,23 @@ impl AutoTx for EthClient {
         send_task: &SendTask,
         storage: &Storage,
     ) -> Result<String> {
-        // get tx
-        let eth_tx = TransactionParameters::from(send_task);
+        let request_key = &send_task.base_data.request_key;
 
         // get signed
         let account = send_task.send_data.account.clone();
-        let signed_tx = self.sign_transaction(eth_tx, account.clone()).await?;
 
+        // get raw_transaction
+        let raw_transaction =
+            if let Ok(raw_tx_bytes) = storage.load_raw_transaction_bytes(request_key).await {
+                Bytes(raw_tx_bytes.bytes)
+            } else {
+                // get tx
+                let eth_tx = TransactionParameters::from(send_task);
+                let signed_tx = self.sign_transaction(eth_tx, account.clone()).await?;
+                signed_tx.raw_transaction
+            };
         // send
-        let request_key = &send_task.base_data.request_key;
-        match self.send_raw_transaction(signed_tx.raw_transaction).await {
+        match self.send_raw_transaction(raw_transaction).await {
             Ok(hash) => {
                 let hash_to_check = hash.0.to_vec();
                 storage.store_status(request_key, &Status::Uncheck).await?;
@@ -227,6 +256,8 @@ impl AutoTx for EthClient {
                 let new_timeout = self.try_update_timeout(address, timeout).await?;
                 if timeout != new_timeout {
                     storage.store_timeout(request_key, &new_timeout).await?;
+                    // need rebuild the transaction
+                    storage.delete_raw_transaction_bytes(request_key).await?;
                     info!(
                         "unsend task: {} update timeout, nonce: {}",
                         request_key,

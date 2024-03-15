@@ -418,7 +418,7 @@ impl AutoTx for CitaClient {
         &mut self,
         init_task: &InitTask,
         storage: &Storage,
-    ) -> Result<(Timeout, Gas)> {
+    ) -> Result<(String, Timeout, Gas)> {
         // get timeout
         let timeout = Timeout::Cita(CitaTimeout {
             remain_time: init_task.timeout,
@@ -431,23 +431,13 @@ impl AutoTx for CitaClient {
             .estimate_gas(init_task.send_data.clone(), Some(storage))
             .await;
 
-        // store all
-        let request_key = &init_task.base_data.request_key;
-
-        storage.store_timeout(request_key, &timeout).await?;
-        storage.store_gas(request_key, &gas).await?;
-        storage.store_init_task(request_key, init_task).await?;
-
-        Ok((timeout, gas))
-    }
-
-    async fn process_send_task(
-        &mut self,
-        send_task: &SendTask,
-        storage: &Storage,
-    ) -> Result<String> {
         // get tx
-        let mut cita_tx = CitaTransaction::from(send_task);
+        let mut cita_tx = CitaTransaction::from(&SendTask {
+            base_data: init_task.base_data.clone(),
+            send_data: init_task.send_data.clone(),
+            timeout,
+            gas,
+        });
 
         // update args
         let version = self.get_version(Some(storage)).await?;
@@ -468,7 +458,7 @@ impl AutoTx for CitaClient {
 
         // get signed
         let tx_bytes: Vec<u8> = cita_tx.write_to_bytes()?;
-        let account = &send_task.send_data.account;
+        let account = &init_task.send_data.account;
         let message_hash = hex::encode(account.hash(&tx_bytes));
         // get sig
         let sig = account.sign(&message_hash).await?;
@@ -478,10 +468,76 @@ impl AutoTx for CitaClient {
         unverified_tx.set_signature(sig);
         unverified_tx.set_crypto(Crypto::DEFAULT);
         let unverified_tx_vec = unverified_tx.write_to_bytes()?;
+        //get tx hash
+        let tx_hash = account.hash(&unverified_tx_vec);
+        let tx_hash_str = tx_hash.encode_hex::<String>();
+
+        // store all
+        let request_key = &init_task.base_data.request_key;
+
+        storage
+            .store_raw_transaction_bytes(
+                request_key,
+                &RawTransactionBytes {
+                    bytes: unverified_tx_vec,
+                },
+            )
+            .await?;
+        storage.store_timeout(request_key, &timeout).await?;
+        storage.store_gas(request_key, &gas).await?;
+        storage.store_init_task(request_key, init_task).await?;
+
+        Ok((tx_hash_str, timeout, gas))
+    }
+
+    async fn process_send_task(
+        &mut self,
+        send_task: &SendTask,
+        storage: &Storage,
+    ) -> Result<String> {
+        let request_key = &send_task.base_data.request_key;
+        let unverified_tx_vec =
+            if let Ok(raw_tx_bytes) = storage.load_raw_transaction_bytes(request_key).await {
+                raw_tx_bytes.bytes
+            } else {
+                // get tx
+                let mut cita_tx = CitaTransaction::from(send_task);
+
+                // update args
+                let version = self.get_version(Some(storage)).await?;
+                match version {
+                    0 => {
+                        // new to must be empty
+                        cita_tx.to_v1 = Vec::new();
+                        cita_tx.chain_id = self.get_chain_id(Some(storage)).await?;
+                    }
+                    version if version < 3 => {
+                        // old to must be empty
+                        cita_tx.to = String::new();
+                        cita_tx.chain_id_v1 = self.get_chain_id_v1(Some(storage)).await?;
+                    }
+                    _ => unreachable!(),
+                }
+                cita_tx.version = version;
+
+                // get signed
+                let tx_bytes: Vec<u8> = cita_tx.write_to_bytes()?;
+                let account = &send_task.send_data.account;
+                let message_hash = hex::encode(account.hash(&tx_bytes));
+                // get sig
+                let sig = account.sign(&message_hash).await?;
+                // organize UnverifiedTransaction
+                let mut unverified_tx = UnverifiedTransaction::new();
+                unverified_tx.set_transaction(cita_tx);
+                unverified_tx.set_signature(sig);
+                unverified_tx.set_crypto(Crypto::DEFAULT);
+
+                unverified_tx.write_to_bytes()?
+            };
+
         let signed_tx = add_0x(hex::encode(&unverified_tx_vec));
 
         // send
-        let request_key = &send_task.base_data.request_key;
         let send_result = self.send_signed_transaction(&signed_tx);
         match send_result {
             Ok(hash_to_check) => {
@@ -514,6 +570,8 @@ impl AutoTx for CitaClient {
                     Ok(new_timeout) => {
                         if timeout != new_timeout {
                             storage.store_timeout(request_key, &new_timeout).await?;
+                            // need rebuild the transaction
+                            storage.delete_raw_transaction_bytes(request_key).await?;
                             info!(
                                 "unsend task: {} update timeout, remain_time: {}",
                                 request_key,

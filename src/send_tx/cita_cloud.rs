@@ -3,7 +3,7 @@ use crate::config::get_config;
 use crate::kms::{Account, Kms};
 use crate::storage::Storage;
 use cita_cloud_proto::blockchain::{
-    raw_transaction::Tx, RawTransaction, Transaction as CitaCloudlTransaction,
+    raw_transaction::Tx, RawTransaction, Transaction as CitaCloudTransaction,
     UnverifiedTransaction, Witness,
 };
 use cita_cloud_proto::client::{ClientOptions, InterceptedSvc};
@@ -16,12 +16,13 @@ use cita_cloud_proto::evm::rpc_service_client::RpcServiceClient as EvmRpcService
 use cita_cloud_proto::evm::{ByteQuota, Receipt};
 use cita_cloud_proto::executor::CallRequest;
 use cita_cloud_proto::retry::RetryClient;
+use cita_cloud_proto::status_code::StatusCodeEnum;
 use color_eyre::eyre::{eyre, Result};
 use ethabi::ethereum_types::U256;
 use hex::ToHex;
 use prost::Message;
 
-impl From<&SendTask> for CitaCloudlTransaction {
+impl From<&SendTask> for CitaCloudTransaction {
     fn from(value: &SendTask) -> Self {
         let tx_data = value.send_data.tx_data.clone();
         let nonce = value.base_data.request_key.clone();
@@ -41,7 +42,7 @@ impl From<&SendTask> for CitaCloudlTransaction {
 }
 
 async fn get_raw_tx(
-    cita_cloud_tx: &CitaCloudlTransaction,
+    cita_cloud_tx: &CitaCloudTransaction,
     account: &Account,
 ) -> Result<RawTransaction> {
     // get hash
@@ -269,7 +270,7 @@ impl AutoTx for CitaCloudClient {
         &mut self,
         init_task: &InitTask,
         storage: &Storage,
-    ) -> Result<(Timeout, Gas)> {
+    ) -> Result<(String, Timeout, Gas)> {
         debug!("process_init_task: {:?}", init_task);
         // get timeout
         let timeout = Timeout::Cita(CitaTimeout {
@@ -282,15 +283,41 @@ impl AutoTx for CitaCloudClient {
         let gas = self
             .estimate_gas(init_task.send_data.clone(), storage)
             .await;
+        // get tx
+        let mut cita_cloud_tx = CitaCloudTransaction::from(&SendTask {
+            base_data: init_task.base_data.clone(),
+            send_data: init_task.send_data.clone(),
+            timeout,
+            gas,
+        });
+        // update args
+        let system_config = self.get_system_config(Some(storage)).await?;
+        cita_cloud_tx.version = system_config.version;
+        cita_cloud_tx.chain_id = system_config.chain_id;
+        // get raw_tx
+        let account = &init_task.send_data.account;
+        let raw_tx = get_raw_tx(&cita_cloud_tx, account).await?;
+        // get tx_hash
+        let tx_hash = get_tx_hash(&raw_tx)?;
+        let tx_hash_str = tx_hash.encode_hex::<String>();
+        // get tx_bytes
+        let tx_bytes = {
+            let mut buf = Vec::with_capacity(raw_tx.encoded_len());
+            raw_tx.encode(&mut buf)?;
+            buf
+        };
 
         // store all
         let request_key = &init_task.base_data.request_key;
 
+        storage
+            .store_raw_transaction_bytes(request_key, &RawTransactionBytes { bytes: tx_bytes })
+            .await?;
         storage.store_timeout(request_key, &timeout).await?;
         storage.store_gas(request_key, &gas).await?;
         storage.store_init_task(request_key, init_task).await?;
 
-        Ok((timeout, gas))
+        Ok((tx_hash_str, timeout, gas))
     }
 
     async fn process_send_task(
@@ -299,19 +326,24 @@ impl AutoTx for CitaCloudClient {
         storage: &Storage,
     ) -> Result<String> {
         debug!("process_send_task: {:?}", send_task);
-        // get tx
-        let mut cita_cloud_tx = CitaCloudlTransaction::from(send_task);
-        // update args
-        let system_config = self.get_system_config(Some(storage)).await?;
-        cita_cloud_tx.version = system_config.version;
-        cita_cloud_tx.chain_id = system_config.chain_id;
+        let request_key = &send_task.base_data.request_key;
+        let raw_tx = if let Ok(raw_tx_bytes) = storage.load_raw_transaction_bytes(request_key).await
+        {
+            RawTransaction::decode::<std::collections::VecDeque<u8>>(raw_tx_bytes.bytes.into())?
+        } else {
+            // get tx
+            let mut cita_cloud_tx = CitaCloudTransaction::from(send_task);
+            // update args
+            let system_config = self.get_system_config(Some(storage)).await?;
+            cita_cloud_tx.version = system_config.version;
+            cita_cloud_tx.chain_id = system_config.chain_id;
 
-        // get raw_tx
-        let account = &send_task.send_data.account;
-        let raw_tx = get_raw_tx(&cita_cloud_tx, account).await?;
+            // get raw_tx
+            let account = &send_task.send_data.account;
+            get_raw_tx(&cita_cloud_tx, account).await?
+        };
 
         // send
-        let request_key = &send_task.base_data.request_key;
         let send_result = self.send_raw_transaction(raw_tx).await;
         match send_result {
             Ok(hash) => {
@@ -346,6 +378,8 @@ impl AutoTx for CitaCloudClient {
                         debug!("{request_key} new_timeout: {new_timeout} ");
                         if timeout != new_timeout {
                             storage.store_timeout(request_key, &new_timeout).await?;
+                            // need rebuild the transaction
+                            storage.delete_raw_transaction_bytes(request_key).await?;
                             info!(
                                 "unsend task: {} update timeout, remain_time: {}",
                                 request_key,
@@ -522,5 +556,13 @@ impl AutoTx for CitaCloudClient {
                 Err(e)
             }
         }
+    }
+}
+
+pub fn get_tx_hash(raw_tx: &RawTransaction) -> Result<&[u8], StatusCodeEnum> {
+    match raw_tx.tx {
+        Some(Tx::NormalTx(ref normal_tx)) => Ok(&normal_tx.transaction_hash),
+        Some(Tx::UtxoTx(ref utxo_tx)) => Ok(&utxo_tx.transaction_hash),
+        None => Err(StatusCodeEnum::NoTransaction),
     }
 }

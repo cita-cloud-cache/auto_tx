@@ -87,7 +87,7 @@ macro_rules! store_and_load {
                 }
 
                 #[allow(unused)]
-                async fn [<delete_$var_name>](&self, request_key: &str) -> Result<()> {
+                pub($vis) async fn [<delete_$var_name>](&self, request_key: &str) -> Result<()> {
                     let path = format!("{}/{}/{}/{}", get_config().name, $dir, request_key, stringify!($var_name));
                     self.operator
                         .clone()
@@ -107,6 +107,12 @@ store_and_load!(crate, Timeout, timeout, "processing");
 store_and_load!(crate, Gas, gas, "processing");
 store_and_load!(crate, HashToCheck, hash_to_check, "processing");
 store_and_load!(crate, Status, status, "processing");
+store_and_load!(
+    crate,
+    RawTransactionBytes,
+    raw_transaction_bytes,
+    "processing"
+);
 store_and_load!(crate, AutoTxResult, auto_tx_result, "result");
 
 impl Storage {
@@ -164,6 +170,8 @@ impl Storage {
 
     pub async fn downgrade_to_unsend(&self, request_key: &str) -> Result<()> {
         self.delete_hash_to_check(request_key).await?;
+        // need rebuild the transaction
+        self.delete_raw_transaction_bytes(request_key).await?;
         self.store_status(request_key, &Status::Unsend).await?;
         Ok(())
     }
