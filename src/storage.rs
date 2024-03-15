@@ -189,6 +189,7 @@ impl Storage {
         self.delete_gas(request_key).await?;
         self.delete_hash_to_check(request_key).await?;
         self.delete_status(request_key).await?;
+        self.delete_raw_transaction_bytes(request_key).await?;
 
         self.store_auto_tx_result(request_key, auto_tx_result)
             .await?;
