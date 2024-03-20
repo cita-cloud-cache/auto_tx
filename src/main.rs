@@ -24,19 +24,17 @@ extern crate tracing;
 
 mod chains;
 mod config;
-mod get_onchain_hash;
 mod get_receipt;
+mod get_task;
 mod kms;
 mod send_tx;
 mod storage;
+mod task;
 mod util;
 
 use crate::{
-    config::set_config,
-    get_onchain_hash::get_onchain_hash as get_onchain_hash_handler,
-    get_receipt::get_receipt as get_receipt_handler,
-    kms::set_kms,
-    send_tx::{types::Status, AutoTx},
+    config::set_config, get_receipt::get_receipt as get_receipt_handler,
+    get_task::get_task as get_task_handler, kms::set_kms, send_tx::AutoTx, task::Status,
 };
 use chains::Chains;
 use clap::Parser;
@@ -150,26 +148,26 @@ async fn run(opts: RunOpts) -> Result<()> {
     let router = Router::new()
         .hoop(affix::inject(state.clone()))
         .push(Router::with_path("/api/<chain_name>/send_tx").post(handle_send_tx))
-        .push(Router::with_path("/api/get_onchain_hash").get(get_onchain_hash_handler))
-        .push(Router::with_path("/api/<chain_name>/get_receipt/<hash>").get(get_receipt_handler));
+        .push(Router::with_path("/api/<chain_name>/get_receipt/<hash>").get(get_receipt_handler))
+        .push(Router::with_path("/api/task/<hash>").get(get_task_handler));
 
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(tokio::time::Duration::from_secs(process_interval)).await;
             match state.storage.get_processing_tasks().await {
                 Ok(processing) => {
-                    for request_key in processing {
+                    for init_hash in processing {
                         let state = state.clone();
 
-                        if let Ok(status) = state.storage.load_status(&request_key).await {
+                        if let Ok(status) = state.storage.load_status(&init_hash).await {
                             match status {
                                 Status::Unsend => {
                                     tokio::spawn(async move {
                                         if let Ok(lock_key) =
-                                            state.storage.try_lock_task(&request_key).await
+                                            state.storage.try_lock_task(&init_hash).await
                                         {
                                             if let Ok(send_task) =
-                                                state.storage.load_send_task(&request_key).await
+                                                state.storage.load_send_task(&init_hash).await
                                             {
                                                 let chain_name =
                                                     send_task.base_data.chain_name.as_ref();
@@ -179,6 +177,7 @@ async fn run(opts: RunOpts) -> Result<()> {
                                                     chain
                                                         .chain_client
                                                         .process_send_task(
+                                                            &init_hash,
                                                             &send_task,
                                                             &state.storage,
                                                         )
@@ -193,26 +192,28 @@ async fn run(opts: RunOpts) -> Result<()> {
                                 Status::Uncheck => {
                                     tokio::spawn(async move {
                                         if let Ok(check_task) =
-                                            state.storage.load_check_task(&request_key).await
+                                            state.storage.load_check_task(&init_hash).await
                                         {
                                             let chain_name =
                                                 check_task.base_data.chain_name.as_ref();
                                             if let Ok(mut chain) =
                                                 state.chains.get_chain(chain_name).await
                                             {
-                                                debug!(
-                                                    "checking task: {}",
-                                                    &check_task.base_data.request_key
-                                                );
+                                                debug!("checking task: {}", &init_hash);
                                                 chain
                                                     .chain_client
-                                                    .process_check_task(&check_task, &state.storage)
+                                                    .process_check_task(
+                                                        &init_hash,
+                                                        &check_task,
+                                                        &state.storage,
+                                                    )
                                                     .await
                                                     .ok();
                                             }
                                         }
                                     });
                                 }
+                                _ => {}
                             }
                         }
                     }

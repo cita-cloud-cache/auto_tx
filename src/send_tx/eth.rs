@@ -1,7 +1,8 @@
-use super::{types::*, AutoTx, DEFAULT_QUOTA};
+use super::{AutoTx, DEFAULT_QUOTA};
 use crate::config::get_config;
 use crate::kms::Account;
 use crate::storage::Storage;
+use crate::task::*;
 use color_eyre::eyre::{eyre, Result};
 use common_rs::error::CALError;
 use ethabi::ethereum_types::{H256, U64};
@@ -20,7 +21,7 @@ const TRASNACTION_TYPE: u64 = 2;
 impl From<&SendTask> for TransactionParameters {
     fn from(value: &SendTask) -> Self {
         let to = value
-            .send_data
+            .base_data
             .tx_data
             .to
             .as_ref()
@@ -29,8 +30,8 @@ impl From<&SendTask> for TransactionParameters {
         let nonce = value.timeout.get_eth_timeout().nonce;
         Self {
             to,
-            value: value.send_data.tx_data.value.1,
-            data: Bytes(value.send_data.tx_data.data.clone()),
+            value: value.base_data.tx_data.value.1,
+            data: Bytes(value.base_data.tx_data.data.clone()),
             gas: U256::from(gas),
             nonce: Some(nonce),
             transaction_type: Some(U64::from(2)),
@@ -127,12 +128,17 @@ impl EthClient {
         Ok(Timeout::Eth(timeout))
     }
 
-    pub async fn estimate_gas(&mut self, send_data: SendData) -> Gas {
+    pub async fn estimate_gas(&mut self, init_task: &InitTaskParam) -> Gas {
         let call_request = CallRequest {
-            from: Some(send_data.account.address()),
-            to: send_data.tx_data.to.map(|to| Address::from_slice(&to)),
-            value: Some(send_data.tx_data.value.1),
-            data: Some(Bytes(send_data.tx_data.data.clone())),
+            from: Some(init_task.base_data.account.address()),
+            to: init_task
+                .base_data
+                .tx_data
+                .to
+                .clone()
+                .map(|to| Address::from_slice(&to)),
+            value: Some(init_task.base_data.tx_data.value.1),
+            data: Some(Bytes(init_task.base_data.tx_data.data.clone())),
             transaction_type: Some(TRASNACTION_TYPE.into()),
             ..Default::default()
         };
@@ -159,79 +165,69 @@ impl EthClient {
 impl AutoTx for EthClient {
     async fn process_init_task(
         &mut self,
-        init_task: &InitTask,
+        init_task: &InitTaskParam,
         storage: &Storage,
     ) -> Result<(String, Timeout, Gas)> {
         // get timeout
         let timeout = Timeout::Eth(EthTimeout {
             nonce: U256::default(),
         });
-        let from = init_task.send_data.account.address();
+        let from = init_task.base_data.account.address();
         let timeout = self.try_update_timeout(from, timeout).await?;
 
         // get Gas
-        let gas = self.estimate_gas(init_task.send_data.clone()).await;
+        let gas = self.estimate_gas(init_task).await;
         // get tx
-        let eth_tx = TransactionParameters::from(&SendTask {
+        let mut send_task = SendTask {
             base_data: init_task.base_data.clone(),
-            send_data: init_task.send_data.clone(),
             timeout,
             gas,
-        });
+            raw_transaction_bytes: None,
+        };
+        let eth_tx = TransactionParameters::from(&send_task);
 
         // get signed
-        let account = init_task.send_data.account.clone();
+        let account = init_task.base_data.account.clone();
         let signed_tx = self.sign_transaction(eth_tx, account.clone()).await?;
         // get tx_hash
         let tx_hash = signed_tx.transaction_hash.0;
         let tx_hash_str = tx_hash.encode_hex::<String>();
 
         // store all
-        let request_key = &init_task.base_data.request_key;
-
-        storage
-            .store_raw_transaction_bytes(
-                request_key,
-                &RawTransactionBytes {
-                    bytes: signed_tx.raw_transaction.0,
-                },
-            )
-            .await?;
-        storage.store_timeout(request_key, &timeout).await?;
-        storage.store_gas(request_key, &gas).await?;
-        storage.store_init_task(request_key, init_task).await?;
+        send_task.raw_transaction_bytes = Some(RawTransactionBytes {
+            bytes: signed_tx.raw_transaction.0,
+        });
+        storage.store_send_task(&tx_hash_str, &send_task).await?;
 
         Ok((tx_hash_str, timeout, gas))
     }
 
     async fn process_send_task(
         &mut self,
-        send_task: &SendTask,
+        init_hash: &str,
+        task: &SendTask,
         storage: &Storage,
     ) -> Result<String> {
-        let request_key = &send_task.base_data.request_key;
-
         // get signed
-        let account = send_task.send_data.account.clone();
+        let account = task.base_data.account.clone();
 
         // get raw_transaction
-        let raw_transaction =
-            if let Ok(raw_tx_bytes) = storage.load_raw_transaction_bytes(request_key).await {
-                Bytes(raw_tx_bytes.bytes)
-            } else {
-                // get tx
-                let eth_tx = TransactionParameters::from(send_task);
-                let signed_tx = self.sign_transaction(eth_tx, account.clone()).await?;
-                signed_tx.raw_transaction
-            };
+        let raw_transaction = if let Some(raw_tx_bytes) = &task.raw_transaction_bytes {
+            Bytes(raw_tx_bytes.bytes.clone())
+        } else {
+            // get tx
+            let eth_tx = TransactionParameters::from(task);
+            let signed_tx = self.sign_transaction(eth_tx, account.clone()).await?;
+            signed_tx.raw_transaction
+        };
         // send
         match self.send_raw_transaction(raw_transaction).await {
             Ok(hash) => {
                 let hash_to_check = hash.0.to_vec();
-                storage.store_status(request_key, &Status::Uncheck).await?;
+                storage.store_status(init_hash, &Status::Uncheck).await?;
                 storage
                     .store_hash_to_check(
-                        request_key,
+                        init_hash,
                         &HashToCheck {
                             hash: hash_to_check.clone(),
                         },
@@ -241,26 +237,22 @@ impl AutoTx for EthClient {
                 let hash_str = hash_to_check.encode_hex::<String>();
                 info!(
                     "unsend task: {} send success, hash: {}",
-                    request_key, hash_str
+                    init_hash, hash_str
                 );
                 Ok(hash_str)
             }
             Err(e) => {
-                warn!(
-                    "unsend task: {} send failed: {}",
-                    request_key,
-                    e.to_string(),
-                );
+                warn!("unsend task: {} send failed: {}", init_hash, e.to_string(),);
                 let address = account.address();
-                let timeout = send_task.timeout;
+                let timeout = task.timeout;
                 let new_timeout = self.try_update_timeout(address, timeout).await?;
                 if timeout != new_timeout {
-                    storage.store_timeout(request_key, &new_timeout).await?;
+                    storage.store_timeout(init_hash, &new_timeout).await?;
                     // need rebuild the transaction
-                    storage.delete_raw_transaction_bytes(request_key).await?;
+                    storage.delete_raw_transaction_bytes(init_hash).await?;
                     info!(
                         "unsend task: {} update timeout, nonce: {}",
-                        request_key,
+                        init_hash,
                         timeout.get_eth_timeout().nonce
                     );
                 }
@@ -272,27 +264,27 @@ impl AutoTx for EthClient {
 
     async fn process_check_task(
         &mut self,
+        init_hash: &str,
         check_task: &CheckTask,
         storage: &Storage,
-    ) -> Result<AutoTxResult> {
-        let request_key = &check_task.base_data.request_key;
+    ) -> Result<TaskResult> {
         let hash = &check_task.hash_to_check.hash;
         let hash_str = hash.encode_hex::<String>();
         match self.transaction_receipt(H256::from_slice(hash)).await {
             Ok(result) => match result {
                 Some(receipt) => {
-                    let gas = storage.load_gas(request_key).await?;
+                    let gas = storage.load_gas(init_hash).await?;
                     match (receipt.status, receipt.gas_used) {
                         (Some(status), _) if status == U64::from(1) => {
                             // success
                             let contract_address =
                                 receipt.contract_address.map(|s| s.encode_hex::<String>());
                             let auto_tx_result =
-                                AutoTxResult::success(hash_str.clone(), contract_address);
-                            storage.finalize_task(request_key, &auto_tx_result).await?;
+                                TaskResult::success(hash_str.clone(), contract_address);
+                            storage.finalize_task(init_hash, &auto_tx_result).await?;
                             info!(
                                 "uncheck task: {} check success, hash: {}",
-                                request_key, hash_str
+                                init_hash, hash_str
                             );
 
                             Ok(auto_tx_result)
@@ -303,21 +295,21 @@ impl AutoTx for EthClient {
                             // self_update and resend
                             match self.self_update_gas(gas, Some(storage)).await {
                                 Ok(gas) => {
-                                    storage.store_gas(request_key, &gas).await?;
-                                    storage.downgrade_to_unsend(request_key).await?;
+                                    storage.store_gas(init_hash, &gas).await?;
+                                    storage.downgrade_to_unsend(init_hash).await?;
                                     warn!(
                                     "uncheck task: {} check failed: out of gas, hash: {}, self_update and resend, gas: {}",
-                                    request_key, hash_str, gas.gas
+                                    init_hash, hash_str, gas.gas
                                 );
                                 }
                                 Err(e) => {
                                     if e.to_string().as_str() == "reach quota_limit" {
                                         let auto_tx_result =
-                                            AutoTxResult::failed(Some(hash_str), e.to_string());
-                                        storage.finalize_task(request_key, &auto_tx_result).await?;
+                                            TaskResult::failed(Some(hash_str), e.to_string());
+                                        storage.finalize_task(init_hash, &auto_tx_result).await?;
                                         warn!(
                                             "uncheck task: {} failed: reach quota_limit",
-                                            request_key,
+                                            init_hash,
                                         );
                                     }
                                 }
@@ -329,11 +321,11 @@ impl AutoTx for EthClient {
                             // record failed
                             let err_info = "execute failed".to_string();
                             let auto_tx_result =
-                                AutoTxResult::failed(Some(hash_str.clone()), err_info.clone());
-                            storage.finalize_task(request_key, &auto_tx_result).await?;
+                                TaskResult::failed(Some(hash_str.clone()), err_info.clone());
+                            storage.finalize_task(init_hash, &auto_tx_result).await?;
                             warn!(
                                 "uncheck task: {} failed: {}, hash: {}",
-                                request_key, err_info, hash_str,
+                                init_hash, err_info, hash_str,
                             );
 
                             Err(eyre!(err_info.to_owned()))
@@ -341,15 +333,15 @@ impl AutoTx for EthClient {
                     }
                 }
                 None => {
-                    warn!("uncheck task: {} check failed: not found", request_key,);
-                    let address = storage.load_account(request_key).await?.address();
-                    let timeout = storage.load_timeout(request_key).await?;
+                    warn!("uncheck task: {} check failed: not found", init_hash,);
+                    let timeout = storage.load_timeout(init_hash).await?;
+                    let address = check_task.base_data.account.address();
                     let new_timeout = self.try_update_timeout(address, timeout).await?;
                     if timeout != new_timeout {
-                        storage.store_timeout(request_key, &new_timeout).await?;
+                        storage.store_timeout(init_hash, &new_timeout).await?;
                         info!(
                             "uncheck task: {} update timeout, nonce: {}",
-                            request_key,
+                            init_hash,
                             timeout.get_eth_timeout().nonce
                         );
                     }
@@ -360,7 +352,7 @@ impl AutoTx for EthClient {
             Err(e) => {
                 warn!(
                     "uncheck task: {} check failed: {}",
-                    request_key,
+                    init_hash,
                     e.to_string(),
                 );
                 Err(e)
@@ -368,7 +360,7 @@ impl AutoTx for EthClient {
         }
     }
 
-    async fn get_receipt(&mut self, hash: &str) -> Result<AutoTxResult> {
+    async fn get_receipt(&mut self, hash: &str) -> Result<TaskResult> {
         match self
             .transaction_receipt(H256::from_slice(&hex::decode(hash)?))
             .await
@@ -385,7 +377,7 @@ impl AutoTx for EthClient {
                                 hash, contract_address
                             );
                             let auto_tx_result =
-                                AutoTxResult::success(hash.to_string(), contract_address);
+                                TaskResult::success(hash.to_string(), contract_address);
                             Ok(auto_tx_result)
                         }
                         _ => {

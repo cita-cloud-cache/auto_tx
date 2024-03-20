@@ -2,13 +2,13 @@ pub mod cita;
 pub mod cita_cloud;
 pub mod cita_create;
 pub mod eth;
-pub mod types;
 
 use crate::{
     chains::*,
     config::CitaCreateConfig,
     kms::{Account, Kms},
     storage::Storage,
+    task::*,
     util::{add_0x, remove_quotes_and_0x},
     AutoTxGlobalState, RequestParams,
 };
@@ -20,7 +20,6 @@ use common_rs::{
 use salvo::prelude::*;
 use serde_json::json;
 use std::sync::Arc;
-use types::*;
 
 pub const DEFAULT_QUOTA: u64 = 10_000_000;
 pub const DEFAULT_QUOTA_LIMIT: u64 = 1_073_741_824;
@@ -29,29 +28,31 @@ pub const BASE_QUOTA: u64 = 21000;
 pub trait AutoTx {
     async fn process_init_task(
         &mut self,
-        init_task: &InitTask,
+        init_task: &InitTaskParam,
         storage: &Storage,
     ) -> Result<(String, Timeout, Gas)>;
 
     async fn process_send_task(
         &mut self,
+        init_hash: &str,
         send_task: &SendTask,
         storage: &Storage,
     ) -> Result<String>;
 
     async fn process_check_task(
         &mut self,
+        init_hash: &str,
         check_task: &CheckTask,
         storage: &Storage,
-    ) -> Result<AutoTxResult>;
+    ) -> Result<TaskResult>;
 
-    async fn get_receipt(&mut self, hash: &str) -> Result<AutoTxResult>;
+    async fn get_receipt(&mut self, hash: &str) -> Result<TaskResult>;
 }
 
 impl AutoTx for ChainClient {
     async fn process_init_task(
         &mut self,
-        init_task: &InitTask,
+        init_task: &InitTaskParam,
         storage: &Storage,
     ) -> Result<(String, Timeout, Gas)> {
         match self {
@@ -63,29 +64,55 @@ impl AutoTx for ChainClient {
 
     async fn process_send_task(
         &mut self,
+        init_hash: &str,
         send_task: &SendTask,
         storage: &Storage,
     ) -> Result<String> {
         match self {
-            ChainClient::CitaCloud(client) => client.process_send_task(send_task, storage).await,
-            ChainClient::Cita(client) => client.process_send_task(send_task, storage).await,
-            ChainClient::Eth(client) => client.process_send_task(send_task, storage).await,
+            ChainClient::CitaCloud(client) => {
+                client
+                    .process_send_task(init_hash, send_task, storage)
+                    .await
+            }
+            ChainClient::Cita(client) => {
+                client
+                    .process_send_task(init_hash, send_task, storage)
+                    .await
+            }
+            ChainClient::Eth(client) => {
+                client
+                    .process_send_task(init_hash, send_task, storage)
+                    .await
+            }
         }
     }
 
     async fn process_check_task(
         &mut self,
+        init_hash: &str,
         check_task: &CheckTask,
         storage: &Storage,
-    ) -> Result<AutoTxResult> {
+    ) -> Result<TaskResult> {
         match self {
-            ChainClient::CitaCloud(client) => client.process_check_task(check_task, storage).await,
-            ChainClient::Cita(client) => client.process_check_task(check_task, storage).await,
-            ChainClient::Eth(client) => client.process_check_task(check_task, storage).await,
+            ChainClient::CitaCloud(client) => {
+                client
+                    .process_check_task(init_hash, check_task, storage)
+                    .await
+            }
+            ChainClient::Cita(client) => {
+                client
+                    .process_check_task(init_hash, check_task, storage)
+                    .await
+            }
+            ChainClient::Eth(client) => {
+                client
+                    .process_check_task(init_hash, check_task, storage)
+                    .await
+            }
         }
     }
 
-    async fn get_receipt(&mut self, hash: &str) -> Result<AutoTxResult> {
+    async fn get_receipt(&mut self, hash: &str) -> Result<TaskResult> {
         match self {
             ChainClient::CitaCloud(client) => client.get_receipt(hash).await,
             ChainClient::Cita(client) => client.get_receipt(hash).await,
@@ -166,10 +193,8 @@ pub async fn handle(
                 if data.errMsg.is_empty() {
                     data.contractAddress = remove_quotes_and_0x(&data.contractAddress);
                     data.deployTxHash = remove_quotes_and_0x(&data.deployTxHash);
-                    let result = AutoTxResult::success(
-                        data.deployTxHash.clone(),
-                        Some(data.contractAddress),
-                    );
+                    let result =
+                        TaskResult::success(data.deployTxHash.clone(), Some(data.contractAddress));
                     state.storage.finalize_task(&request_key, &result).await?;
                     info!("cita create request success: request_key: {}", request_key);
                     return ok(json!({
@@ -203,12 +228,10 @@ pub async fn handle(
     let tx_data = TxData::new(&params.to, &params.data, &params.value)?;
 
     // get InitTask
-    let init_task = InitTask {
+    let init_task = InitTaskParam {
         base_data: BaseData {
             request_key: request_key.clone(),
-            chain_name,
-        },
-        send_data: SendData {
+            chain_name: chain_name.clone(),
             account: account.clone(),
             tx_data: tx_data.clone(),
         },
@@ -226,6 +249,6 @@ pub async fn handle(
     );
 
     ok(json!({
-        "hash": add_0x(tx_hash)
+        "hash": tx_hash
     }))
 }
