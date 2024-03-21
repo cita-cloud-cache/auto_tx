@@ -20,7 +20,7 @@ impl From<&SendTask> for CitaTransaction {
         let nonce = value.base_data.request_key.clone();
         let valid_until_block = value.timeout.get_cita_timeout().valid_until_block;
         let gas = value.gas.gas;
-        let to_v1 = tx_data.to.clone().unwrap_or_default();
+        let to_v1 = tx_data.to.clone();
         let to = to_v1.encode_hex::<String>();
         Self {
             to,
@@ -390,7 +390,7 @@ impl CitaClient {
                     .get_gas_limit(storage)
                     .await
                     .unwrap_or(DEFAULT_QUOTA_LIMIT);
-                let to_vec = init_task.base_data.tx_data.to.clone().unwrap_or_default();
+                let to_vec = init_task.base_data.tx_data.to.clone();
                 let to = &add_0x(to_vec.encode_hex::<String>());
                 let from = add_0x(init_task.base_data.account.address().encode_hex::<String>());
                 let from = Some(from.as_str());

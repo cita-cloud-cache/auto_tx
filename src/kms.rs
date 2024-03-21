@@ -155,6 +155,7 @@ pub trait Kms {
 pub struct Account {
     user_code: String,
     crypto_type: String,
+    #[serde(with = "crate::util::bytes_hex")]
     address: Vec<u8>,
 }
 

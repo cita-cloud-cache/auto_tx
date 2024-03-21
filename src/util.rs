@@ -40,6 +40,62 @@ pub fn display_value(s: &str) -> Option<String> {
     }
 }
 
+pub mod bytes_hex {
+    use serde::{self, Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S>(bytes: &Vec<u8>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&format!("0x{}", hex::encode(bytes)))
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        hex::decode(s.trim_start_matches("0x")).map_err(serde::de::Error::custom)
+    }
+}
+
+pub mod value_hex {
+    use ethabi::ethereum_types::U256;
+    use serde::{self, Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S>(value: &(Vec<u8>, U256), serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&format!(
+            "0x{},{}",
+            hex::encode(value.0.clone()),
+            &value.1.to_string()
+        ))
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<(Vec<u8>, U256), D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        let str = s.trim_start_matches("0x").split(',').collect::<Vec<&str>>();
+        let value_str = if let Some(value_str) = str.first() {
+            value_str
+        } else {
+            return Err(serde::de::Error::custom("invalid value"));
+        };
+        let u256_str = if let Some(u256_str) = str.get(1) {
+            u256_str
+        } else {
+            return Err(serde::de::Error::custom("invalid value"));
+        };
+        let value = hex::decode(value_str).map_err(serde::de::Error::custom)?;
+        let u256 = U256::from_dec_str(u256_str).map_err(serde::de::Error::custom)?;
+        Ok((value, u256))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

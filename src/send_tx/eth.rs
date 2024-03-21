@@ -20,12 +20,11 @@ const TRASNACTION_TYPE: u64 = 2;
 
 impl From<&SendTask> for TransactionParameters {
     fn from(value: &SendTask) -> Self {
-        let to = value
-            .base_data
-            .tx_data
-            .to
-            .as_ref()
-            .map(|to| Address::from_slice(to));
+        let to = if value.base_data.tx_data.to.is_empty() {
+            None
+        } else {
+            Some(Address::from_slice(&value.base_data.tx_data.to))
+        };
         let gas = value.gas.gas;
         let nonce = value.timeout.get_eth_timeout().nonce;
         Self {
@@ -131,12 +130,11 @@ impl EthClient {
     pub async fn estimate_gas(&mut self, init_task: &InitTaskParam) -> Gas {
         let call_request = CallRequest {
             from: Some(init_task.base_data.account.address()),
-            to: init_task
-                .base_data
-                .tx_data
-                .to
-                .clone()
-                .map(|to| Address::from_slice(&to)),
+            to: if init_task.base_data.tx_data.to.is_empty() {
+                None
+            } else {
+                Some(Address::from_slice(&init_task.base_data.tx_data.to))
+            },
             value: Some(init_task.base_data.tx_data.value.1),
             data: Some(Bytes(init_task.base_data.tx_data.data.clone())),
             transaction_type: Some(TRASNACTION_TYPE.into()),

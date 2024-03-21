@@ -9,8 +9,11 @@ use std::fmt::Display;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TxData {
-    pub to: Option<Vec<u8>>,
+    #[serde(with = "crate::util::bytes_hex")]
+    pub to: Vec<u8>,
+    #[serde(with = "crate::util::bytes_hex")]
     pub data: Vec<u8>,
+    #[serde(with = "crate::util::value_hex")]
     pub value: (Vec<u8>, U256),
 }
 
@@ -31,7 +34,7 @@ impl Display for TxData {
         write!(
             f,
             "to: {}, data: {}, value: {}",
-            add_0x(hex::encode(self.to.as_ref().unwrap_or(&Vec::default()))),
+            add_0x(hex::encode(self.to.clone())),
             data,
             display_value,
         )
@@ -47,7 +50,7 @@ pub enum TxType {
 
 impl TxData {
     pub fn new(to: &str, data: &str, value: &str) -> Result<Self> {
-        let to = parse_data(to).map(|v| if v.is_empty() { None } else { Some(v) })?;
+        let to = parse_data(to).unwrap_or_default();
         let data = parse_data(data)?;
         let value_u256 = U256::from_dec_str(value)?;
         let value = parse_value(value)?;
@@ -59,15 +62,9 @@ impl TxData {
     }
 
     pub fn tx_type(&self) -> TxType {
-        if self.to.is_none() {
+        if self.to.is_empty() {
             TxType::Create
-        } else if self
-            .to
-            .as_ref()
-            .unwrap_or(&Vec::default())
-            .encode_hex::<String>()
-            == remove_quotes_and_0x(STORE_ADDRESS)
-        {
+        } else if self.to.encode_hex::<String>() == remove_quotes_and_0x(STORE_ADDRESS) {
             TxType::Store
         } else {
             TxType::Normal
@@ -160,11 +157,12 @@ pub struct InitTaskParam {
 pub struct Task {
     pub init_hash: String,
 
+    #[serde(flatten)]
     pub base_data: BaseData,
 
     pub status: Status,
     pub timeout: Timeout,
-    pub gas: Gas,
+    pub gas: u64,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<TaskResult>,

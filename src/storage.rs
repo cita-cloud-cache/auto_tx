@@ -153,7 +153,7 @@ impl Storage {
     pub async fn load_task(&self, init_hash: &str) -> Result<Task> {
         let base_data = self.load_base_data(init_hash).await?;
         let timeout = self.load_timeout(init_hash).await?;
-        let gas = self.load_gas(init_hash).await?;
+        let gas = self.load_gas(init_hash).await?.gas;
         let status = self
             .load_status(init_hash)
             .await
