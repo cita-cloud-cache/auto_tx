@@ -96,6 +96,15 @@ pub mod value_hex {
     }
 }
 
+#[test]
+fn test_u256() {
+    let q = "0x0000000000000000000000000000000000000000000000000000000000387165";
+    let q = q.trim_start_matches("0x");
+    let q = hex::decode(q).unwrap();
+    let q = cita_tool::U256::from_big_endian(&q);
+    println!("{:?}", q);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
