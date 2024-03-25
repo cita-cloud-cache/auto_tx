@@ -232,4 +232,33 @@ impl Storage {
         write.unlock(lock_key).await?;
         Ok(())
     }
+
+    pub async fn store_init_hash_by_request_key(
+        &self,
+        request_key: &str,
+        init_hash: &str,
+    ) -> Result<()> {
+        let mut storage = self.operator.clone();
+        let config = get_config();
+        let path = format!("{}/init_hash_by_request_key/{}", config.name, request_key);
+        let lease = storage.lease_grant(config.request_key_ttl, None).await?;
+        let option = PutOptions::new().with_lease(lease.id());
+        storage.put(path, init_hash, Some(option)).await?;
+        Ok(())
+    }
+
+    pub async fn load_init_hash_by_request_key(&self, request_key: &str) -> Result<String> {
+        let path = format!(
+            "{}/init_hash_by_request_key/{}",
+            get_config().name,
+            request_key
+        );
+        let data_vec = self.operator.clone().get(path, None).await?;
+        if let Some(kv) = data_vec.kvs().first() {
+            let init_hash = kv.value_str()?.to_owned();
+            Ok(init_hash)
+        } else {
+            Err(eyre!("data not found"))
+        }
+    }
 }

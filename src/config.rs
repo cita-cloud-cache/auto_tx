@@ -64,6 +64,8 @@ pub struct Config {
 
     pub chain_config_ttl: i64,
 
+    pub request_key_ttl: i64,
+
     pub rpc_timeout: u64,
 
     pub cita_create_config: Option<CitaCreateConfig>,
@@ -87,6 +89,7 @@ impl Default for Config {
             cita_create_config: None,
             service_register_config: Default::default(),
             fast_mode: false,
+            request_key_ttl: 600,
         }
     }
 }
