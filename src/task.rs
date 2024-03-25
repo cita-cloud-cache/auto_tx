@@ -4,13 +4,16 @@ use color_eyre::eyre::Result;
 use ethabi::ethereum_types::U256;
 use hex::ToHex;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, value::Value};
+use serde_json::value::Value;
 use std::fmt::Display;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TxData {
-    pub to: Option<Vec<u8>>,
+    #[serde(with = "crate::util::bytes_hex")]
+    pub to: Vec<u8>,
+    #[serde(with = "crate::util::bytes_hex")]
     pub data: Vec<u8>,
+    #[serde(with = "crate::util::value_hex")]
     pub value: (Vec<u8>, U256),
 }
 
@@ -31,7 +34,7 @@ impl Display for TxData {
         write!(
             f,
             "to: {}, data: {}, value: {}",
-            add_0x(hex::encode(self.to.as_ref().unwrap_or(&Vec::default()))),
+            add_0x(hex::encode(self.to.clone())),
             data,
             display_value,
         )
@@ -47,7 +50,7 @@ pub enum TxType {
 
 impl TxData {
     pub fn new(to: &str, data: &str, value: &str) -> Result<Self> {
-        let to = parse_data(to).map(|v| if v.is_empty() { None } else { Some(v) })?;
+        let to = parse_data(to).unwrap_or_default();
         let data = parse_data(data)?;
         let value_u256 = U256::from_dec_str(value)?;
         let value = parse_value(value)?;
@@ -59,15 +62,9 @@ impl TxData {
     }
 
     pub fn tx_type(&self) -> TxType {
-        if self.to.is_none() {
+        if self.to.is_empty() {
             TxType::Create
-        } else if self
-            .to
-            .as_ref()
-            .unwrap_or(&Vec::default())
-            .encode_hex::<String>()
-            == remove_quotes_and_0x(STORE_ADDRESS)
-        {
+        } else if self.to.encode_hex::<String>() == remove_quotes_and_0x(STORE_ADDRESS) {
             TxType::Store
         } else {
             TxType::Normal
@@ -126,6 +123,11 @@ pub struct Gas {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RawTransactionBytes {
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HashToCheck {
     pub hash: Vec<u8>,
 }
@@ -134,33 +136,44 @@ pub struct HashToCheck {
 pub enum Status {
     Unsend,
     Uncheck,
+    Completed,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BaseData {
     pub request_key: String,
     pub chain_name: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SendData {
     pub account: Account,
     pub tx_data: TxData,
 }
 
 #[derive(Debug)]
-pub struct InitTask {
+pub struct InitTaskParam {
     pub base_data: BaseData,
-    pub send_data: SendData,
     pub timeout: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Task {
+    pub init_hash: String,
+
+    #[serde(flatten)]
+    pub base_data: BaseData,
+
+    pub status: Status,
+    pub timeout: Timeout,
+    pub gas: u64,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<TaskResult>,
 }
 
 #[derive(Debug)]
 pub struct SendTask {
     pub base_data: BaseData,
-    pub send_data: SendData,
     pub timeout: Timeout,
     pub gas: Gas,
+    pub raw_transaction_bytes: Option<RawTransactionBytes>,
 }
 
 #[derive(Debug)]
@@ -169,60 +182,38 @@ pub struct CheckTask {
     pub hash_to_check: HashToCheck,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum AutoTxResult {
-    SuccessInfo(SuccessInfo),
-    FailedInfo(FailedInfo),
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TaskResult {
+    is_success: bool,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    onchain_hash: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    contract_address: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    err: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SuccessInfo {
-    hash: String,
-    contract_address: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FailedInfo {
-    hash: Option<String>,
-    info: String,
-}
-
-impl AutoTxResult {
-    pub const fn success(hash: String, contract_address: Option<String>) -> Self {
-        Self::SuccessInfo(SuccessInfo {
-            hash,
-            contract_address,
-        })
+impl TaskResult {
+    pub fn success(onchain_hash: String, contract_address: Option<String>) -> Self {
+        Self {
+            is_success: true,
+            onchain_hash,
+            contract_address: contract_address.unwrap_or_default(),
+            err: String::default(),
+        }
     }
 
-    pub const fn failed(hash: Option<String>, info: String) -> Self {
-        Self::FailedInfo(FailedInfo { hash, info })
+    pub fn failed(onchain_hash: Option<String>, err: String) -> Self {
+        Self {
+            is_success: false,
+            onchain_hash: onchain_hash.unwrap_or_default(),
+            err,
+            contract_address: String::default(),
+        }
     }
 
     pub fn to_json(&self) -> Value {
-        match self {
-            AutoTxResult::SuccessInfo(s) => match s.contract_address.clone() {
-                Some(addr) => json!({
-                    "is_success": true,
-                    "onchain_hash": add_0x(s.hash.clone()),
-                    "contract_address": add_0x(addr),
-                }),
-                None => json!({
-                    "is_success": true,
-                    "onchain_hash": add_0x(s.hash.clone()),
-                }),
-            },
-            AutoTxResult::FailedInfo(f) => match f.hash.clone() {
-                Some(hash) => json!({
-                    "is_success": false,
-                    "last_hash": add_0x(hash),
-                    "err": f.info,
-                }),
-                None => json!({
-                    "is_success": false,
-                    "err": f.info,
-                }),
-            },
-        }
+        serde_json::to_value(self).unwrap_or_default()
     }
 }

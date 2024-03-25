@@ -1,7 +1,8 @@
-use super::{types::*, AutoTx, BASE_QUOTA, DEFAULT_QUOTA, DEFAULT_QUOTA_LIMIT};
+use super::{AutoTx, BASE_QUOTA, DEFAULT_QUOTA, DEFAULT_QUOTA_LIMIT};
 use crate::config::get_config;
 use crate::kms::Kms;
 use crate::storage::Storage;
+use crate::task::*;
 use crate::util::{add_0x, remove_quotes_and_0x};
 use cita_tool::{
     client::basic::{Client, ClientExt},
@@ -15,11 +16,11 @@ const CITA_BLOCK_LIMIT: u64 = 88;
 
 impl From<&SendTask> for CitaTransaction {
     fn from(value: &SendTask) -> Self {
-        let tx_data = value.send_data.tx_data.clone();
+        let tx_data = value.base_data.tx_data.clone();
         let nonce = value.base_data.request_key.clone();
         let valid_until_block = value.timeout.get_cita_timeout().valid_until_block;
         let gas = value.gas.gas;
-        let to_v1 = tx_data.to.clone().unwrap_or_default();
+        let to_v1 = tx_data.to.clone();
         let to = to_v1.encode_hex::<String>();
         Self {
             to,
@@ -372,12 +373,16 @@ impl CitaClient {
         }
     }
 
-    pub async fn estimate_gas(&mut self, send_data: SendData, storage: Option<&Storage>) -> Gas {
-        match send_data.tx_data.tx_type() {
+    pub async fn estimate_gas(
+        &mut self,
+        init_task: &InitTaskParam,
+        storage: Option<&Storage>,
+    ) -> Gas {
+        match init_task.base_data.tx_data.tx_type() {
             TxType::Store => Gas {
                 // 200 gas per byte
                 // 1.5 times
-                gas: ((send_data.tx_data.data.len() * 200) as u64 + BASE_QUOTA) / 2 * 3,
+                gas: ((init_task.base_data.tx_data.data.len() * 200) as u64 + BASE_QUOTA) / 2 * 3,
             },
             TxType::Create => Gas { gas: DEFAULT_QUOTA },
             TxType::Normal => {
@@ -385,11 +390,11 @@ impl CitaClient {
                     .get_gas_limit(storage)
                     .await
                     .unwrap_or(DEFAULT_QUOTA_LIMIT);
-                let to_vec = send_data.tx_data.to.clone().unwrap_or_default();
+                let to_vec = init_task.base_data.tx_data.to.clone();
                 let to = &add_0x(to_vec.encode_hex::<String>());
-                let from = add_0x(send_data.account.address().encode_hex::<String>());
+                let from = add_0x(init_task.base_data.account.address().encode_hex::<String>());
                 let from = Some(from.as_str());
-                let data = add_0x(send_data.tx_data.data.encode_hex::<String>());
+                let data = add_0x(init_task.base_data.tx_data.data.encode_hex::<String>());
                 let data = Some(data.as_str());
 
                 let quota = self
@@ -416,9 +421,9 @@ impl CitaClient {
 impl AutoTx for CitaClient {
     async fn process_init_task(
         &mut self,
-        init_task: &InitTask,
+        init_task: &InitTaskParam,
         storage: &Storage,
-    ) -> Result<(Timeout, Gas)> {
+    ) -> Result<(String, Timeout, Gas)> {
         // get timeout
         let timeout = Timeout::Cita(CitaTimeout {
             remain_time: init_task.timeout,
@@ -427,27 +432,16 @@ impl AutoTx for CitaClient {
         let timeout = self.try_update_timeout(timeout, Some(storage)).await?;
 
         // get Gas
-        let gas = self
-            .estimate_gas(init_task.send_data.clone(), Some(storage))
-            .await;
+        let gas = self.estimate_gas(init_task, Some(storage)).await;
 
-        // store all
-        let request_key = &init_task.base_data.request_key;
-
-        storage.store_timeout(request_key, &timeout).await?;
-        storage.store_gas(request_key, &gas).await?;
-        storage.store_init_task(request_key, init_task).await?;
-
-        Ok((timeout, gas))
-    }
-
-    async fn process_send_task(
-        &mut self,
-        send_task: &SendTask,
-        storage: &Storage,
-    ) -> Result<String> {
         // get tx
-        let mut cita_tx = CitaTransaction::from(send_task);
+        let mut send_task = SendTask {
+            base_data: init_task.base_data.clone(),
+            timeout,
+            gas,
+            raw_transaction_bytes: None,
+        };
+        let mut cita_tx = CitaTransaction::from(&send_task);
 
         // update args
         let version = self.get_version(Some(storage)).await?;
@@ -468,7 +462,7 @@ impl AutoTx for CitaClient {
 
         // get signed
         let tx_bytes: Vec<u8> = cita_tx.write_to_bytes()?;
-        let account = &send_task.send_data.account;
+        let account = &init_task.base_data.account;
         let message_hash = hex::encode(account.hash(&tx_bytes));
         // get sig
         let sig = account.sign(&message_hash).await?;
@@ -478,17 +472,71 @@ impl AutoTx for CitaClient {
         unverified_tx.set_signature(sig);
         unverified_tx.set_crypto(Crypto::DEFAULT);
         let unverified_tx_vec = unverified_tx.write_to_bytes()?;
+        //get tx hash
+        let tx_hash = account.hash(&unverified_tx_vec);
+        let tx_hash_str = tx_hash.encode_hex::<String>();
+
+        // store all
+        send_task.raw_transaction_bytes = Some(RawTransactionBytes { bytes: tx_bytes });
+        storage.store_send_task(&tx_hash_str, &send_task).await?;
+
+        Ok((tx_hash_str, timeout, gas))
+    }
+
+    async fn process_send_task(
+        &mut self,
+        init_hash: &str,
+        task: &SendTask,
+        storage: &Storage,
+    ) -> Result<String> {
+        let unverified_tx_vec = if let Some(raw_tx_bytes) = &task.raw_transaction_bytes {
+            raw_tx_bytes.bytes.clone()
+        } else {
+            // get tx
+            let mut cita_tx = CitaTransaction::from(task);
+
+            // update args
+            let version = self.get_version(Some(storage)).await?;
+            match version {
+                0 => {
+                    // new to must be empty
+                    cita_tx.to_v1 = Vec::new();
+                    cita_tx.chain_id = self.get_chain_id(Some(storage)).await?;
+                }
+                version if version < 3 => {
+                    // old to must be empty
+                    cita_tx.to = String::new();
+                    cita_tx.chain_id_v1 = self.get_chain_id_v1(Some(storage)).await?;
+                }
+                _ => unreachable!(),
+            }
+            cita_tx.version = version;
+
+            // get signed
+            let tx_bytes: Vec<u8> = cita_tx.write_to_bytes()?;
+            let account = &task.base_data.account;
+            let message_hash = hex::encode(account.hash(&tx_bytes));
+            // get sig
+            let sig = account.sign(&message_hash).await?;
+            // organize UnverifiedTransaction
+            let mut unverified_tx = UnverifiedTransaction::new();
+            unverified_tx.set_transaction(cita_tx);
+            unverified_tx.set_signature(sig);
+            unverified_tx.set_crypto(Crypto::DEFAULT);
+
+            unverified_tx.write_to_bytes()?
+        };
+
         let signed_tx = add_0x(hex::encode(&unverified_tx_vec));
 
         // send
-        let request_key = &send_task.base_data.request_key;
         let send_result = self.send_signed_transaction(&signed_tx);
         match send_result {
             Ok(hash_to_check) => {
-                storage.store_status(request_key, &Status::Uncheck).await?;
+                storage.store_status(init_hash, &Status::Uncheck).await?;
                 storage
                     .store_hash_to_check(
-                        request_key,
+                        init_hash,
                         &HashToCheck {
                             hash: hash_to_check.clone(),
                         },
@@ -498,36 +546,38 @@ impl AutoTx for CitaClient {
                 let hash_str = hash_to_check.encode_hex::<String>();
                 info!(
                     "unsend task: {} send success, hash: {}",
-                    request_key, hash_str
+                    init_hash, hash_str
                 );
                 Ok(hash_str)
             }
             Err(e) => {
-                let timeout = send_task.timeout;
+                let timeout = task.timeout;
                 warn!(
                     "unsend task: {} send failed: {}, remain_time: {}",
-                    request_key,
+                    init_hash,
                     e.to_string(),
                     timeout.get_cita_timeout().remain_time
                 );
                 match self.try_update_timeout(timeout, Some(storage)).await {
                     Ok(new_timeout) => {
                         if timeout != new_timeout {
-                            storage.store_timeout(request_key, &new_timeout).await?;
+                            storage.store_timeout(init_hash, &new_timeout).await?;
+                            // need rebuild the transaction
+                            storage.delete_raw_transaction_bytes(init_hash).await?;
                             info!(
                                 "unsend task: {} update timeout, remain_time: {}",
-                                request_key,
+                                init_hash,
                                 timeout.get_cita_timeout().remain_time
                             );
                         }
                     }
                     Err(e) => {
                         if e.to_string().as_str() == "timeout" {
-                            let auto_tx_result = AutoTxResult::failed(None, e.to_string());
-                            storage.finalize_task(request_key, &auto_tx_result).await?;
+                            let auto_tx_result = TaskResult::failed(None, e.to_string());
+                            storage.finalize_task(init_hash, &auto_tx_result).await?;
                             warn!(
                                 "unsend task: {} failed: timeout, remain_time: {}",
-                                request_key,
+                                init_hash,
                                 timeout.get_cita_timeout().remain_time
                             );
                         }
@@ -541,12 +591,12 @@ impl AutoTx for CitaClient {
 
     async fn process_check_task(
         &mut self,
+        init_hash: &str,
         check_task: &CheckTask,
         storage: &Storage,
-    ) -> Result<AutoTxResult> {
+    ) -> Result<TaskResult> {
         let hash = &check_task.hash_to_check.hash;
         let hash_str = hash.encode_hex::<String>();
-        let request_key = &check_task.base_data.request_key;
         match self.get_transaction_receipt(&add_0x(hash_str.clone())) {
             Ok(receipt) => {
                 match receipt.error_message {
@@ -554,11 +604,11 @@ impl AutoTx for CitaClient {
                         // success
                         let contract_address = receipt.contract_address;
                         let auto_tx_result =
-                            AutoTxResult::success(hash_str.clone(), contract_address);
-                        storage.finalize_task(request_key, &auto_tx_result).await?;
+                            TaskResult::success(hash_str.clone(), contract_address);
+                        storage.finalize_task(init_hash, &auto_tx_result).await?;
                         info!(
                             "uncheck task: {} check success, hash: {}",
-                            request_key, hash_str
+                            init_hash, hash_str
                         );
 
                         Ok(auto_tx_result)
@@ -567,26 +617,26 @@ impl AutoTx for CitaClient {
                         match error.as_str() {
                             "Out of quota." => {
                                 // self_update and resend
-                                let gas = storage.load_gas(request_key).await?;
+                                let gas = storage.load_gas(init_hash).await?;
                                 match self.self_update_gas(gas, Some(storage)).await {
                                     Ok(gas) => {
-                                        storage.store_gas(request_key, &gas).await?;
-                                        storage.downgrade_to_unsend(request_key).await?;
+                                        storage.store_gas(init_hash, &gas).await?;
+                                        storage.downgrade_to_unsend(init_hash).await?;
                                         warn!(
                                         "uncheck task: {} check failed: out of gas, hash: {}, self_update and resend, gas: {}",
-                                        request_key, hash_str, gas.gas
+                                        init_hash, hash_str, gas.gas
                                     );
                                     }
                                     Err(e) => {
                                         if e.to_string().as_str() == "reach quota_limit" {
                                             let auto_tx_result =
-                                                AutoTxResult::failed(Some(hash_str), e.to_string());
+                                                TaskResult::failed(Some(hash_str), e.to_string());
                                             storage
-                                                .finalize_task(request_key, &auto_tx_result)
+                                                .finalize_task(init_hash, &auto_tx_result)
                                                 .await?;
                                             warn!(
                                                 "uncheck task: {} failed: reach quota_limit",
-                                                request_key,
+                                                init_hash,
                                             );
                                         }
                                     }
@@ -597,11 +647,11 @@ impl AutoTx for CitaClient {
                             e => {
                                 // record fail
                                 let auto_tx_result =
-                                    AutoTxResult::failed(Some(hash_str.clone()), e.to_string());
-                                storage.finalize_task(request_key, &auto_tx_result).await?;
+                                    TaskResult::failed(Some(hash_str.clone()), e.to_string());
+                                storage.finalize_task(init_hash, &auto_tx_result).await?;
                                 warn!(
                                     "uncheck task: {} failed: {}, hash: {}",
-                                    request_key, e, hash_str,
+                                    init_hash, e, hash_str,
                                 );
 
                                 Err(eyre!(error))
@@ -611,34 +661,33 @@ impl AutoTx for CitaClient {
                 }
             }
             Err(e) => {
-                let timeout = storage.load_timeout(request_key).await?;
+                let timeout = storage.load_timeout(init_hash).await?;
                 warn!(
                     "uncheck task: {} check failed: {}, remain_time: {}",
-                    request_key,
+                    init_hash,
                     e.to_string(),
                     timeout.get_cita_timeout().remain_time
                 );
                 match self.try_update_timeout(timeout, Some(storage)).await {
                     Ok(new_timeout) => {
                         if timeout != new_timeout {
-                            storage.store_timeout(request_key, &new_timeout).await?;
+                            storage.store_timeout(init_hash, &new_timeout).await?;
                             // resend uncheck task if timeout
-                            storage.downgrade_to_unsend(request_key).await?;
+                            storage.downgrade_to_unsend(init_hash).await?;
                             warn!(
                                 "uncheck task: {} downgrade to unsend, remain_time: {}",
-                                request_key,
+                                init_hash,
                                 timeout.get_cita_timeout().remain_time
                             );
                         }
                     }
                     Err(e) => {
                         if e.to_string().as_str() == "timeout" {
-                            let auto_tx_result =
-                                AutoTxResult::failed(Some(hash_str), e.to_string());
-                            storage.finalize_task(request_key, &auto_tx_result).await?;
+                            let auto_tx_result = TaskResult::failed(Some(hash_str), e.to_string());
+                            storage.finalize_task(init_hash, &auto_tx_result).await?;
                             warn!(
                                 "uncheck task: {} failed: timeout, remain_time: {}",
-                                request_key,
+                                init_hash,
                                 timeout.get_cita_timeout().remain_time
                             );
                         }
@@ -650,7 +699,7 @@ impl AutoTx for CitaClient {
         }
     }
 
-    async fn get_receipt(&mut self, hash: &str) -> Result<AutoTxResult> {
+    async fn get_receipt(&mut self, hash: &str) -> Result<TaskResult> {
         match self.get_transaction_receipt(hash) {
             Ok(receipt) => match receipt.error_message {
                 None => {
@@ -659,7 +708,7 @@ impl AutoTx for CitaClient {
                         hash, receipt.contract_address
                     );
                     let auto_tx_result =
-                        AutoTxResult::success(hash.to_string(), receipt.contract_address);
+                        TaskResult::success(hash.to_string(), receipt.contract_address);
 
                     Ok(auto_tx_result)
                 }
