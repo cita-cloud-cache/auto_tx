@@ -56,10 +56,7 @@ pub async fn send_cita_create(
     data: &str,
     request_key: &str,
 ) -> Result<CitaCreateResponse> {
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
+    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
     let (sign, api_sign) = sign(
         &config.appid,
         &config.appsecret,
@@ -71,27 +68,27 @@ pub async fn send_cita_create(
     let mut headers = HeaderMap::new();
     headers.insert(
         HeaderName::from_static("accessid"),
-        HeaderValue::from_str(&config.accessid).unwrap(),
+        HeaderValue::from_str(&config.accessid)?,
     );
     headers.insert(
         HeaderName::from_static("sign"),
-        HeaderValue::from_str(&sign).unwrap(),
+        HeaderValue::from_str(&sign)?,
     );
     headers.insert(
         HeaderName::from_static("timestamp"),
-        HeaderValue::from_str(&timestamp.to_string()).unwrap(),
+        HeaderValue::from_str(&timestamp.to_string())?,
     );
     headers.insert(
         HeaderName::from_static("appid"),
-        HeaderValue::from_str(&config.appid).unwrap(),
+        HeaderValue::from_str(&config.appid)?,
     );
     headers.insert(
         HeaderName::from_static("verify"),
-        HeaderValue::from_str(&config.verify).unwrap(),
+        HeaderValue::from_str(&config.verify)?,
     );
     headers.insert(
         HeaderName::from_static("apisign"),
-        HeaderValue::from_str(&api_sign).unwrap(),
+        HeaderValue::from_str(&api_sign)?,
     );
     let contract_name = if request_key.len() > 40 {
         &request_key[..40]

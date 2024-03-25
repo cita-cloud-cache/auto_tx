@@ -1,4 +1,5 @@
-use super::{types::*, AutoTx, BASE_QUOTA, DEFAULT_QUOTA, DEFAULT_QUOTA_LIMIT, RPC_TIMEOUT};
+use super::{types::*, AutoTx, BASE_QUOTA, DEFAULT_QUOTA, DEFAULT_QUOTA_LIMIT};
+use crate::config::get_config;
 use crate::kms::{Account, Kms};
 use crate::storage::Storage;
 use cita_cloud_proto::blockchain::{
@@ -16,7 +17,6 @@ use cita_cloud_proto::evm::{ByteQuota, Receipt};
 use cita_cloud_proto::executor::CallRequest;
 use cita_cloud_proto::retry::RetryClient;
 use color_eyre::eyre::{eyre, Result};
-use common_rs::error::CALError;
 use ethabi::ethereum_types::U256;
 use hex::ToHex;
 use prost::Message;
@@ -47,7 +47,7 @@ async fn get_raw_tx(
     // get hash
     let tx_bytes = {
         let mut buf = Vec::with_capacity(cita_cloud_tx.encoded_len());
-        cita_cloud_tx.encode(&mut buf).unwrap();
+        cita_cloud_tx.encode(&mut buf)?;
         buf
     };
     let hash_vec = account.hash(&tx_bytes);
@@ -121,7 +121,7 @@ impl CitaCloudClient {
     }
 
     async fn get_system_config(&mut self, storage: Option<&Storage>) -> Result<SystemConfig> {
-        let key = format!("AutoTx/ChainSysConfig/{}", self.chain_name);
+        let key = format!("{}/ChainSysConfig/{}", get_config().name, self.chain_name);
         if let Some(storage) = storage {
             if let Ok(system_config_bytes) = storage.get(key.clone()).await {
                 let system_config = SystemConfig::decode::<std::collections::VecDeque<u8>>(
@@ -138,11 +138,11 @@ impl CitaCloudClient {
         if let Some(storage) = storage {
             let system_config_bytes = {
                 let mut buf = Vec::with_capacity(system_config.encoded_len());
-                system_config.encode(&mut buf).unwrap();
+                system_config.encode(&mut buf)?;
                 buf
             };
             storage
-                .put_with_lease(key, system_config_bytes, 3)
+                .put_with_lease(key, system_config_bytes, get_config().chain_config_ttl)
                 .await
                 .ok();
         }
@@ -199,7 +199,7 @@ impl CitaCloudClient {
 
                 Ok(Timeout::Cita(timeout))
             }
-            (true, false) => Err(CALError::TransactionTimeout.into()),
+            (true, false) => Err(eyre!("timeout")),
             (false, _) => Ok(Timeout::Cita(timeout)),
         }
     }
@@ -229,7 +229,7 @@ impl CitaCloudClient {
                     height: 0,
                 };
                 let estimate_quota_timeout = tokio::time::timeout(
-                    std::time::Duration::from_secs(RPC_TIMEOUT),
+                    std::time::Duration::from_millis(get_config().rpc_timeout),
                     self.estimate_quota(call),
                 );
                 match estimate_quota_timeout.await {
@@ -270,6 +270,7 @@ impl AutoTx for CitaCloudClient {
         init_task: &InitTask,
         storage: &Storage,
     ) -> Result<(Timeout, Gas)> {
+        debug!("process_init_task: {:?}", init_task);
         // get timeout
         let timeout = Timeout::Cita(CitaTimeout {
             remain_time: init_task.timeout,
@@ -297,6 +298,7 @@ impl AutoTx for CitaCloudClient {
         send_task: &SendTask,
         storage: &Storage,
     ) -> Result<String> {
+        debug!("process_send_task: {:?}", send_task);
         // get tx
         let mut cita_cloud_tx = CitaCloudlTransaction::from(send_task);
         // update args
@@ -341,6 +343,7 @@ impl AutoTx for CitaCloudClient {
                 );
                 match self.try_update_timeout(timeout, storage).await {
                     Ok(new_timeout) => {
+                        debug!("{request_key} new_timeout: {new_timeout} ");
                         if timeout != new_timeout {
                             storage.store_timeout(request_key, &new_timeout).await?;
                             info!(
@@ -373,11 +376,12 @@ impl AutoTx for CitaCloudClient {
         check_task: &CheckTask,
         storage: &Storage,
     ) -> Result<AutoTxResult> {
+        debug!("process_check_task: {:?}", check_task);
         let hash = check_task.hash_to_check.hash.clone();
         let hash_str = hash.encode_hex::<String>();
         let request_key = &check_task.base_data.request_key;
         let get_transaction_receipt_timeout = tokio::time::timeout(
-            std::time::Duration::from_secs(RPC_TIMEOUT),
+            std::time::Duration::from_millis(get_config().rpc_timeout),
             self.get_transaction_receipt(Hash { hash }),
         );
         match get_transaction_receipt_timeout.await {

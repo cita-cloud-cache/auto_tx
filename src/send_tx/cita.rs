@@ -1,4 +1,5 @@
 use super::{types::*, AutoTx, BASE_QUOTA, DEFAULT_QUOTA, DEFAULT_QUOTA_LIMIT};
+use crate::config::get_config;
 use crate::kms::Kms;
 use crate::storage::Storage;
 use crate::util::{add_0x, remove_quotes_and_0x};
@@ -54,7 +55,11 @@ impl CitaClient {
     }
 
     async fn get_block_interval(&self, storage: Option<&Storage>) -> Result<u64> {
-        let key = format!("AutoTx/ChainSysConfig/{}/block_interval", self.chain_name);
+        let key = format!(
+            "{}/ChainSysConfig/{}/block_interval",
+            get_config().name,
+            self.chain_name
+        );
         if let Some(storage) = storage {
             if let Ok(block_interval_bytes) = storage.get(key.clone()).await {
                 let block_interval = u64::from_be_bytes(block_interval_bytes.try_into().unwrap());
@@ -67,14 +72,15 @@ impl CitaClient {
             .map_err(|_| eyre!("get_metadata failed"))?;
         let block_interval = match resp.is_ok() {
             true => {
-                let ResponseValue::Map(map) = resp.result().unwrap() else {
-                    unreachable!()
-                };
-                map.get("blockInterval")
-                    .map(|p| p.to_string())
-                    .unwrap_or_default()
-                    .parse::<u64>()?
-                    / 1000
+                if let Some(ResponseValue::Map(map)) = resp.result() {
+                    map.get("blockInterval")
+                        .map(|p| p.to_string())
+                        .unwrap_or_default()
+                        .parse::<u64>()?
+                        / 1000
+                } else {
+                    return Err(eyre!("get_block_interval failed: result is empty"));
+                }
             }
             false => {
                 return Err(eyre!(
@@ -86,7 +92,7 @@ impl CitaClient {
         if let Some(storage) = storage {
             let block_interval_bytes = block_interval.to_be_bytes();
             storage
-                .put_with_lease(key, block_interval_bytes, 3)
+                .put_with_lease(key, block_interval_bytes, get_config().chain_config_ttl)
                 .await
                 .ok();
         }
@@ -94,7 +100,11 @@ impl CitaClient {
     }
 
     pub async fn get_gas_limit(&self, storage: Option<&Storage>) -> Result<u64> {
-        let key = format!("AutoTx/ChainSysConfig/{}/gas_limit", self.chain_name);
+        let key = format!(
+            "{}/ChainSysConfig/{}/gas_limit",
+            get_config().name,
+            self.chain_name
+        );
         if let Some(storage) = storage {
             if let Ok(gas_limit_bytes) = storage.get(key.clone()).await {
                 let gas_limit = u64::from_be_bytes(gas_limit_bytes.try_into().unwrap());
@@ -113,11 +123,11 @@ impl CitaClient {
             .map_err(|_| eyre!("get_gas_limit failed"))?;
         let gas_limit = match resp.is_ok() {
             true => {
-                let ResponseValue::Singe(ParamsValue::String(gas_limit)) = resp.result().unwrap()
-                else {
-                    unreachable!()
-                };
-                u64::from_str_radix(&remove_quotes_and_0x(&gas_limit), 16)?
+                if let Some(ResponseValue::Singe(ParamsValue::String(gas_limit))) = resp.result() {
+                    u64::from_str_radix(&remove_quotes_and_0x(&gas_limit), 16)?
+                } else {
+                    return Err(eyre!("get_gas_limit failed: result is empty"));
+                }
             }
             false => {
                 return Err(eyre!(
@@ -128,13 +138,20 @@ impl CitaClient {
         };
         if let Some(storage) = storage {
             let gas_limit_bytes = gas_limit.to_be_bytes();
-            storage.put_with_lease(key, gas_limit_bytes, 3).await.ok();
+            storage
+                .put_with_lease(key, gas_limit_bytes, get_config().chain_config_ttl)
+                .await
+                .ok();
         }
         Ok(gas_limit)
     }
 
     async fn get_version(&self, storage: Option<&Storage>) -> Result<u32> {
-        let key = format!("AutoTx/ChainSysConfig/{}/version", self.chain_name);
+        let key = format!(
+            "{}/ChainSysConfig/{}/version",
+            get_config().name,
+            self.chain_name
+        );
         if let Some(storage) = storage {
             if let Ok(version_bytes) = storage.get(key.clone()).await {
                 let version = u32::from_be_bytes(version_bytes.try_into().unwrap());
@@ -147,13 +164,20 @@ impl CitaClient {
             .map_err(|_| eyre!("get_version failed"))?;
         if let Some(storage) = storage {
             let version_bytes = version.to_be_bytes();
-            storage.put_with_lease(key, version_bytes, 3).await.ok();
+            storage
+                .put_with_lease(key, version_bytes, get_config().chain_config_ttl)
+                .await
+                .ok();
         }
         Ok(version)
     }
 
     async fn get_chain_id(&mut self, storage: Option<&Storage>) -> Result<u32> {
-        let key = format!("AutoTx/ChainSysConfig/{}/chain_id", self.chain_name);
+        let key = format!(
+            "{}/ChainSysConfig/{}/chain_id",
+            get_config().name,
+            self.chain_name
+        );
         if let Some(storage) = storage {
             if let Ok(chain_id_bytes) = storage.get(key.clone()).await {
                 let chain_id = u32::from_be_bytes(chain_id_bytes.try_into().unwrap());
@@ -166,12 +190,19 @@ impl CitaClient {
             .map_err(|_| eyre!("get_chain_id failed"))?;
         if let Some(storage) = storage {
             let chain_id_bytes = chain_id.to_be_bytes();
-            storage.put_with_lease(key, chain_id_bytes, 3).await.ok();
+            storage
+                .put_with_lease(key, chain_id_bytes, get_config().chain_config_ttl)
+                .await
+                .ok();
         }
         Ok(chain_id)
     }
     async fn get_chain_id_v1(&mut self, storage: Option<&Storage>) -> Result<Vec<u8>> {
-        let key = format!("AutoTx/ChainSysConfig/{}/chain_id_v1", self.chain_name);
+        let key = format!(
+            "{}/ChainSysConfig/{}/chain_id_v1",
+            get_config().name,
+            self.chain_name
+        );
         if let Some(storage) = storage {
             if let Ok(chain_id_v1) = storage.get(key.clone()).await {
                 return Ok(chain_id_v1);
@@ -184,7 +215,10 @@ impl CitaClient {
                 .completed_lower_hex(),
         )?;
         if let Some(storage) = storage {
-            storage.put_with_lease(key, chain_id.clone(), 3).await.ok();
+            storage
+                .put_with_lease(key, chain_id.clone(), get_config().chain_config_ttl)
+                .await
+                .ok();
         }
         Ok(chain_id)
     }
@@ -203,12 +237,12 @@ impl CitaClient {
 
         match resp.is_ok() {
             true => {
-                let ResponseValue::Singe(ParamsValue::String(quota)) = resp.result().unwrap()
-                else {
-                    unreachable!()
-                };
-                let quota = u64::from_str_radix(&remove_quotes_and_0x(&quota), 16)?;
-                Ok(quota)
+                if let Some(ResponseValue::Singe(ParamsValue::String(quota))) = resp.result() {
+                    let quota = u64::from_str_radix(&remove_quotes_and_0x(&quota), 16)?;
+                    Ok(quota)
+                } else {
+                    Err(eyre!("estimate_quota failed: result is empty",))
+                }
             }
             false => Err(eyre!(
                 "estimate_quota failed: {}",
@@ -225,14 +259,15 @@ impl CitaClient {
 
         match resp.is_ok() {
             true => {
-                let ResponseValue::Map(map) = resp.result().unwrap() else {
-                    unreachable!()
-                };
-                let hash = remove_quotes_and_0x(
-                    &map.get("hash").map(|e| e.to_string()).unwrap_or_default(),
-                );
-                let hash_vec = hex::decode(hash)?;
-                Ok(hash_vec)
+                if let Some(ResponseValue::Map(map)) = resp.result() {
+                    let hash = remove_quotes_and_0x(
+                        &map.get("hash").map(|e| e.to_string()).unwrap_or_default(),
+                    );
+                    let hash_vec = hex::decode(hash)?;
+                    Ok(hash_vec)
+                } else {
+                    Err(eyre!("send_signed_transaction failed: result is empty",))
+                }
             }
             false => Err(eyre!(
                 "send_signed_transaction failed: {}",
@@ -248,36 +283,37 @@ impl CitaClient {
             .map_err(|_| eyre!("get_transaction_receipt failed"))?;
         match resp.is_ok() {
             true => {
-                let ResponseValue::Map(map) = resp.result().unwrap() else {
-                    unreachable!()
-                };
-                let error_message = map
-                    .get("errorMessage")
-                    .ok_or(eyre!("receipt no errorMessage"))
-                    .map(|v| {
-                        let s = remove_quotes_and_0x(&v.to_string());
-                        if &s == "null" {
-                            None
-                        } else {
-                            Some(s)
-                        }
-                    })?;
-                let contract_address = map
-                    .get("contractAddress")
-                    .ok_or(eyre!("receipt no errorMessage"))
-                    .map(|v| {
-                        let s = remove_quotes_and_0x(&v.to_string());
-                        if &s == "null" {
-                            None
-                        } else {
-                            Some(s)
-                        }
-                    })?;
+                if let Some(ResponseValue::Map(map)) = resp.result() {
+                    let error_message = map
+                        .get("errorMessage")
+                        .ok_or(eyre!("receipt no errorMessage"))
+                        .map(|v| {
+                            let s = remove_quotes_and_0x(&v.to_string());
+                            if &s == "null" {
+                                None
+                            } else {
+                                Some(s)
+                            }
+                        })?;
+                    let contract_address = map
+                        .get("contractAddress")
+                        .ok_or(eyre!("receipt no errorMessage"))
+                        .map(|v| {
+                            let s = remove_quotes_and_0x(&v.to_string());
+                            if &s == "null" {
+                                None
+                            } else {
+                                Some(s)
+                            }
+                        })?;
 
-                Ok(ReceiptInfo {
-                    error_message,
-                    contract_address,
-                })
+                    Ok(ReceiptInfo {
+                        error_message,
+                        contract_address,
+                    })
+                } else {
+                    Err(eyre!("get_transaction_receipt failed: result is empty"))
+                }
             }
             false => match resp.error() {
                 Some(e) => Err(eyre!("get_transaction_receipt failed: {}", e.message())),

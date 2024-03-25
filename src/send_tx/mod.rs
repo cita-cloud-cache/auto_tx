@@ -25,7 +25,6 @@ use types::*;
 pub const DEFAULT_QUOTA: u64 = 10_000_000;
 pub const DEFAULT_QUOTA_LIMIT: u64 = 1_073_741_824;
 pub const BASE_QUOTA: u64 = 21000;
-pub const RPC_TIMEOUT: u64 = 1;
 
 pub trait AutoTx {
     async fn process_init_task(
@@ -215,6 +214,11 @@ pub async fn handle(
         },
         timeout,
     };
+    let lock_key = state
+        .storage
+        .try_lock_task(&request_key)
+        .await
+        .map_err(|e| eyre!("Duplicate Tx: {e}"))?;
     let (timeout, gas) = chain
         .chain_client
         .process_init_task(&init_task, &state.storage)
@@ -225,6 +229,7 @@ pub async fn handle(
             "receive send_tx request: request_key: {}, user_code: {}\n\tchain: {}\n\tfrom: {}, tx_data: {}\n\ttimeout: {}, gas: {}",
             request_key, user_code, chain, account.address_str(), tx_data, timeout, gas.gas
         );
+        state.storage.unlock_task(&lock_key).await.ok();
         return ok(json!({}));
     }
 
@@ -237,12 +242,11 @@ pub async fn handle(
     };
 
     let hash = {
-        state.processing_lock.lock_task(&request_key).await;
         let hash = chain
             .chain_client
             .process_send_task(&send_task, &state.storage)
             .await?;
-        state.processing_lock.unlock_task(&request_key).await;
+        state.storage.unlock_task(&lock_key).await.ok();
         hash
     };
 

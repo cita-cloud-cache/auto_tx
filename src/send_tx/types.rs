@@ -26,7 +26,7 @@ impl Display for TxData {
         };
 
         let value_str = hex::encode(self.value.0.clone());
-        let display_value = display_value(&value_str).unwrap();
+        let display_value = display_value(&value_str).unwrap_or_default();
 
         write!(
             f,
@@ -148,12 +148,14 @@ pub struct SendData {
     pub tx_data: TxData,
 }
 
+#[derive(Debug)]
 pub struct InitTask {
     pub base_data: BaseData,
     pub send_data: SendData,
     pub timeout: u32,
 }
 
+#[derive(Debug)]
 pub struct SendTask {
     pub base_data: BaseData,
     pub send_data: SendData,
@@ -161,6 +163,7 @@ pub struct SendTask {
     pub gas: Gas,
 }
 
+#[derive(Debug)]
 pub struct CheckTask {
     pub base_data: BaseData,
     pub hash_to_check: HashToCheck,

@@ -12,9 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::send_tx::{cita::CitaClient, cita_cloud::CitaCloudClient, eth::EthClient};
+use crate::{
+    config::get_config,
+    send_tx::{cita::CitaClient, cita_cloud::CitaCloudClient, eth::EthClient},
+};
 use color_eyre::eyre::{eyre, Result};
-use common_rs::consul;
+use common_rs::etcd::Etcd;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 use tokio::sync::RwLock;
@@ -112,37 +115,26 @@ impl Chain {
     }
 }
 
-#[derive(Clone, Debug)]
-struct ConfigCenter {
-    url: String,
-    consul_dir: String,
-}
-
-impl ConfigCenter {
-    const fn new(url: String, consul_dir: String) -> Self {
-        Self { url, consul_dir }
-    }
-
-    async fn request_chain_info(&self, chain_name: &str) -> Result<Chain> {
-        let str = consul::read_raw_key(&self.url, &(self.consul_dir.clone() + chain_name)).await?;
-        let chain_info: ChainInfo = serde_json::from_str(str.as_str())?;
-        Chain::new(chain_name, chain_info).await
-    }
-}
-
 #[derive(Clone)]
 pub struct Chains {
     serve_chains: Arc<RwLock<HashMap<String, Chain>>>,
-    config_center: ConfigCenter,
+    config_center: Etcd,
 }
 
 impl Chains {
-    pub fn new(url: String, consul_dir: String) -> Self {
+    pub async fn new(endpoints: Vec<String>) -> Self {
         let chains = HashMap::new();
         Self {
             serve_chains: Arc::new(RwLock::new(chains)),
-            config_center: ConfigCenter::new(url, consul_dir),
+            config_center: Etcd::new(endpoints).await.unwrap(),
         }
+    }
+
+    async fn request_chain_info(&self, chain_name: &str) -> Result<Chain> {
+        let key = format!("{}/ChainInfo/{}", get_config().name, chain_name);
+        let kv = self.config_center.get(key).await?;
+        let chain_info: ChainInfo = serde_json::from_str(kv.value_str()?)?;
+        Chain::new(chain_name, chain_info).await
     }
 
     pub async fn get_chain(&self, chain_name: &str) -> Result<Chain> {
@@ -158,7 +150,7 @@ impl Chains {
 
         let chain_info = write_guard
             .entry(chain_name.to_string())
-            .or_insert(self.config_center.request_chain_info(chain_name).await?)
+            .or_insert(self.request_chain_info(chain_name).await?)
             .to_owned();
 
         Ok(chain_info)

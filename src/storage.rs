@@ -1,8 +1,8 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, time::Duration};
 
-use crate::{kms::Account, send_tx::types::*};
+use crate::{config::get_config, kms::Account, send_tx::types::*};
 use color_eyre::eyre::{eyre, Result};
-use etcd_client::{Client, GetOptions, PutOptions};
+use etcd_client::{Client, ConnectOptions, GetOptions, LockOptions, PutOptions};
 use paste::paste;
 
 #[derive(Clone)]
@@ -13,10 +13,22 @@ pub struct Storage {
 impl Storage {
     pub async fn new(endpoints: Vec<String>) -> Self {
         info!(" etcd endpoints: {:?}", endpoints);
-        let operator = Client::connect(&endpoints, None)
-            .await
-            .map_err(|e| println!("etcd connect failed: {e}"))
-            .unwrap();
+        let operator = Client::connect(
+            &endpoints,
+            Some(
+                ConnectOptions::new()
+                    .with_connect_timeout(Duration::from_secs(get_config().rpc_timeout))
+                    .with_keep_alive(
+                        Duration::from_secs(300),
+                        Duration::from_secs(get_config().rpc_timeout),
+                    )
+                    .with_keep_alive_while_idle(true)
+                    .with_timeout(Duration::from_secs(get_config().rpc_timeout)),
+            ),
+        )
+        .await
+        .map_err(|e| println!("etcd connect failed: {e}"))
+        .unwrap();
         Self { operator }
     }
 
@@ -50,7 +62,7 @@ macro_rules! store_and_load {
             impl Storage {
                 pub($vis) async fn [<store_$var_name>](&self, request_key: &str, data: &$data_type) -> Result<()> {
                     let data_vec = bincode::serialize(&data)?;
-                    let path = format!("{}/{}/{}", $dir, request_key, stringify!($var_name));
+                    let path = format!("{}/{}/{}/{}", get_config().name, $dir, request_key, stringify!($var_name));
                     self.operator
                         .clone()
                         .put(path, data_vec, None)
@@ -59,7 +71,7 @@ macro_rules! store_and_load {
                 }
 
                 pub($vis) async fn [<load_$var_name>](&self, request_key: &str) -> Result<$data_type> {
-                    let path = format!("{}/{}/{}", $dir, request_key, stringify!($var_name));
+                    let path = format!("{}/{}/{}/{}", get_config().name, $dir, request_key, stringify!($var_name));
                     let data_vec = self
                         .operator
                         .clone()
@@ -76,7 +88,7 @@ macro_rules! store_and_load {
 
                 #[allow(unused)]
                 async fn [<delete_$var_name>](&self, request_key: &str) -> Result<()> {
-                    let path = format!("{}/{}/{}", $dir, request_key, stringify!($var_name));
+                    let path = format!("{}/{}/{}/{}", get_config().name, $dir, request_key, stringify!($var_name));
                     self.operator
                         .clone()
                         .delete(path, None)
@@ -177,19 +189,40 @@ impl Storage {
     }
 
     pub async fn get_processing_tasks(&self) -> Result<Vec<String>> {
-        let option = GetOptions::new().with_prefix();
+        let config = get_config();
+        // add limit for OutOfRange error
+        let option = GetOptions::new()
+            .with_prefix()
+            .with_keys_only()
+            .with_limit(config.etcd_get_limit);
         let entries = self
             .operator
             .clone()
-            .get("processing/", Some(option))
+            .get(format!("{}/processing/", config.name), Some(option))
             .await?;
         let mut result = HashSet::new();
         for e in entries.kvs().iter() {
-            if let Some(key) = e.key_str()?.split('/').take(2).last() {
+            if let Some(key) = e.key_str()?.split('/').take(3).last() {
                 result.insert(key.to_owned());
             }
         }
 
         Ok(result.into_iter().collect())
+    }
+
+    pub async fn try_lock_task(&self, request_key: &str) -> Result<Vec<u8>> {
+        let config = get_config();
+        let mut write = self.operator.clone();
+        let lease = write.lease_grant(config.max_timeout.into(), None).await?;
+        let option = LockOptions::new().with_lease(lease.id());
+        let key = format!("{}/locked_task/{}", config.name, request_key);
+        let lock_key = write.lock(key, Some(option)).await?.key().to_vec();
+        Ok(lock_key)
+    }
+
+    pub async fn unlock_task(&self, lock_key: &[u8]) -> Result<()> {
+        let mut write = self.operator.clone();
+        write.unlock(lock_key).await?;
+        Ok(())
     }
 }
