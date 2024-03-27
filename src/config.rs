@@ -68,6 +68,8 @@ pub struct Config {
 
     pub rpc_timeout: u64,
 
+    pub try_lock_timeout: u64,
+
     pub cita_create_config: Option<CitaCreateConfig>,
 
     pub service_register_config: Option<ServiceRegisterConfig>,
@@ -86,6 +88,7 @@ impl Default for Config {
             etcd_get_limit: 20480,
             chain_config_ttl: 3,
             rpc_timeout: 1000,
+            try_lock_timeout: 200,
             cita_create_config: None,
             service_register_config: Default::default(),
             fast_mode: false,

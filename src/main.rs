@@ -148,7 +148,7 @@ async fn run(opts: RunOpts) -> Result<()> {
     let router = Router::new()
         .hoop(affix::inject(state.clone()))
         .push(Router::with_path("/api/<chain_name>/send_tx").post(handle_send_tx))
-        .push(Router::with_path("/api/<chain_name>/get_receipt/<hash>").get(get_receipt_handler))
+        .push(Router::with_path("/api/<chain_name>/receipt/<hash>").get(get_receipt_handler))
         .push(Router::with_path("/api/task/<hash>").get(get_task_handler));
 
     tokio::spawn(async move {
@@ -156,41 +156,42 @@ async fn run(opts: RunOpts) -> Result<()> {
             tokio::time::sleep(tokio::time::Duration::from_secs(process_interval)).await;
             match state.storage.get_processing_tasks().await {
                 Ok(processing) => {
-                    for init_hash in processing {
+                    for (init_hash, status) in processing {
                         let state = state.clone();
-
-                        if let Ok(status) = state.storage.load_status(&init_hash).await {
-                            match status {
-                                Status::Unsend => {
-                                    tokio::spawn(async move {
-                                        if let Ok(lock_key) =
-                                            state.storage.try_lock_task(&init_hash).await
+                        match status {
+                            Status::Unsend => {
+                                tokio::spawn(async move {
+                                    if let Ok(lock_key) =
+                                        state.storage.try_lock_task(&init_hash).await
+                                    {
+                                        if let Ok(send_task) =
+                                            state.storage.load_send_task(&init_hash).await
                                         {
-                                            if let Ok(send_task) =
-                                                state.storage.load_send_task(&init_hash).await
+                                            let chain_name =
+                                                send_task.base_data.chain_name.as_ref();
+                                            if let Ok(mut chain) =
+                                                state.chains.get_chain(chain_name).await
                                             {
-                                                let chain_name =
-                                                    send_task.base_data.chain_name.as_ref();
-                                                if let Ok(mut chain) =
-                                                    state.chains.get_chain(chain_name).await
-                                                {
-                                                    chain
-                                                        .chain_client
-                                                        .process_send_task(
-                                                            &init_hash,
-                                                            &send_task,
-                                                            &state.storage,
-                                                        )
-                                                        .await
-                                                        .ok();
-                                                }
+                                                chain
+                                                    .chain_client
+                                                    .process_send_task(
+                                                        &init_hash,
+                                                        &send_task,
+                                                        &state.storage,
+                                                    )
+                                                    .await
+                                                    .ok();
                                             }
-                                            state.storage.unlock_task(&lock_key).await.ok();
                                         }
-                                    });
-                                }
-                                Status::Uncheck => {
-                                    tokio::spawn(async move {
+                                        state.storage.unlock_task(&lock_key).await.ok();
+                                    }
+                                });
+                            }
+                            Status::Uncheck => {
+                                tokio::spawn(async move {
+                                    if let Ok(lock_key) =
+                                        state.storage.try_lock_task(&init_hash).await
+                                    {
                                         if let Ok(check_task) =
                                             state.storage.load_check_task(&init_hash).await
                                         {
@@ -211,10 +212,11 @@ async fn run(opts: RunOpts) -> Result<()> {
                                                     .ok();
                                             }
                                         }
-                                    });
-                                }
-                                _ => {}
+                                        state.storage.unlock_task(&lock_key).await.ok();
+                                    }
+                                });
                             }
+                            _ => {}
                         }
                     }
                 }

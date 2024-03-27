@@ -190,7 +190,7 @@ impl Storage {
         Ok(())
     }
 
-    pub async fn get_processing_tasks(&self) -> Result<Vec<String>> {
+    pub async fn get_processing_tasks(&self) -> Result<Vec<(String, Status)>> {
         let config = get_config();
         // add limit for OutOfRange error
         let option = GetOptions::new()
@@ -207,10 +207,13 @@ impl Storage {
             .iter()
             .filter_map(|e| {
                 if let Ok(key_str) = e.key_str() {
-                    key_str.split('/').last().map(|s| s.to_owned())
-                } else {
-                    None
+                    if let Some(init_hash) = key_str.split('/').last() {
+                        if let Ok(data) = serde_json::from_slice::<Status>(e.value()) {
+                            return Some((init_hash.to_owned(), data));
+                        }
+                    }
                 }
+                None
             })
             .collect();
 
@@ -220,10 +223,16 @@ impl Storage {
     pub async fn try_lock_task(&self, init_hash: &str) -> Result<Vec<u8>> {
         let config = get_config();
         let mut write = self.operator.clone();
-        let lease = write.lease_grant(config.max_timeout.into(), None).await?;
+        let lease = write
+            .lease_grant(config.rpc_timeout as i64 * 2, None)
+            .await?;
         let option = LockOptions::new().with_lease(lease.id());
         let key = format!("{}/locked_task/{}", config.name, init_hash);
-        let lock_key = write.lock(key, Some(option)).await?.key().to_vec();
+        let try_lock_timeout = tokio::time::timeout(
+            std::time::Duration::from_millis(config.try_lock_timeout),
+            write.lock(key, Some(option)),
+        );
+        let lock_key = try_lock_timeout.await??.key().to_vec();
         Ok(lock_key)
     }
 
