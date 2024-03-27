@@ -195,7 +195,6 @@ impl Storage {
         // add limit for OutOfRange error
         let option = GetOptions::new()
             .with_prefix()
-            .with_keys_only()
             .with_limit(config.etcd_get_limit);
         let entries = self
             .operator
