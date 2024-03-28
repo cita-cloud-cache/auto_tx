@@ -235,6 +235,7 @@ impl Storage {
         Ok(lock_key)
     }
 
+    #[allow(dead_code)]
     pub async fn unlock_task(&self, lock_key: &[u8]) -> Result<()> {
         let mut write = self.operator.clone();
         write.unlock(lock_key).await?;

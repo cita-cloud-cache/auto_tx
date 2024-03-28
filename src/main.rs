@@ -161,7 +161,7 @@ async fn run(opts: RunOpts) -> Result<()> {
                         match status {
                             Status::Unsend => {
                                 tokio::spawn(async move {
-                                    if let Ok(lock_key) =
+                                    if let Ok(_lock_key) =
                                         state.storage.try_lock_task(&init_hash).await
                                     {
                                         if let Ok(send_task) =
@@ -183,13 +183,12 @@ async fn run(opts: RunOpts) -> Result<()> {
                                                     .ok();
                                             }
                                         }
-                                        state.storage.unlock_task(&lock_key).await.ok();
                                     }
                                 });
                             }
                             Status::Uncheck => {
                                 tokio::spawn(async move {
-                                    if let Ok(lock_key) =
+                                    if let Ok(_lock_key) =
                                         state.storage.try_lock_task(&init_hash).await
                                     {
                                         if let Ok(check_task) =
@@ -212,7 +211,6 @@ async fn run(opts: RunOpts) -> Result<()> {
                                                     .ok();
                                             }
                                         }
-                                        state.storage.unlock_task(&lock_key).await.ok();
                                     }
                                 });
                             }
