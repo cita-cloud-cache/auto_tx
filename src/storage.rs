@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use crate::{config::get_config, task::*};
 use color_eyre::eyre::{eyre, Result};
+use common_rs::etcd::EtcdConfig;
 use etcd_client::{Client, ConnectOptions, GetOptions, LockOptions, PutOptions};
 use paste::paste;
 
@@ -11,19 +12,19 @@ pub struct Storage {
 }
 
 impl Storage {
-    pub async fn new(endpoints: Vec<String>) -> Self {
-        info!(" etcd endpoints: {:?}", endpoints);
+    pub async fn new(config: &EtcdConfig) -> Self {
+        info!(" etcd config: {config:?}");
         let operator = Client::connect(
-            &endpoints,
+            &config.endpoints,
             Some(
                 ConnectOptions::new()
-                    .with_connect_timeout(Duration::from_secs(get_config().rpc_timeout))
+                    .with_connect_timeout(Duration::from_millis(config.timeout))
                     .with_keep_alive(
-                        Duration::from_secs(300),
-                        Duration::from_secs(get_config().rpc_timeout),
+                        Duration::from_secs(config.keep_alive),
+                        Duration::from_millis(config.timeout),
                     )
                     .with_keep_alive_while_idle(true)
-                    .with_timeout(Duration::from_secs(get_config().rpc_timeout)),
+                    .with_timeout(Duration::from_millis(config.timeout)),
             ),
         )
         .await

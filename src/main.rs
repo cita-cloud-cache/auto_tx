@@ -101,8 +101,8 @@ pub struct AutoTxGlobalState {
 impl AutoTxGlobalState {
     async fn new(config: Config) -> Self {
         Self {
-            chains: Chains::new(config.etcd_endpoints.clone()).await,
-            storage: Storage::new(config.etcd_endpoints).await,
+            chains: Chains::new(&config.etcd_config).await,
+            storage: Storage::new(&config.etcd_config).await,
             max_timeout: config.max_timeout,
             cita_create_config: config.cita_create_config,
         }
@@ -137,7 +137,7 @@ async fn run(opts: RunOpts) -> Result<()> {
     let process_interval = config.process_interval;
 
     if let Some(service_register_config) = &config.service_register_config {
-        let etcd = etcd::Etcd::new(config.etcd_endpoints.clone()).await?;
+        let etcd = etcd::Etcd::new(&config.etcd_config).await?;
         etcd.keep_service_register(&config.name, service_register_config.clone())
             .await
             .ok();
