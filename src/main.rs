@@ -156,66 +156,63 @@ async fn run(opts: RunOpts) -> Result<()> {
             tokio::time::sleep(tokio::time::Duration::from_secs(process_interval)).await;
             match state.storage.get_processing_tasks().await {
                 Ok(processing) => {
-                    for (init_hash, status) in processing {
+                    for init_hash in processing {
                         let state = state.clone();
-                        match status {
-                            Status::Unsend => {
-                                tokio::spawn(async move {
-                                    if let Ok(_lock_key) =
-                                        state.storage.try_lock_task(&init_hash).await
-                                    {
-                                        if let Ok(send_task) =
-                                            state.storage.load_send_task(&init_hash).await
-                                        {
-                                            let chain_name =
-                                                send_task.base_data.chain_name.as_ref();
-                                            if let Ok(mut chain) =
-                                                state.chains.get_chain(chain_name).await
+
+                        tokio::spawn(async move {
+                            if let Ok(lock_key) = state.storage.try_lock_task(&init_hash).await {
+                                if let Ok(status) = state.storage.load_status(&init_hash).await {
+                                    match status {
+                                        Status::Unsend => {
+                                            if let Ok(send_task) =
+                                                state.storage.load_send_task(&init_hash).await
                                             {
-                                                chain
-                                                    .chain_client
-                                                    .process_send_task(
-                                                        &init_hash,
-                                                        &send_task,
-                                                        &state.storage,
-                                                    )
-                                                    .await
-                                                    .ok();
+                                                let chain_name =
+                                                    send_task.base_data.chain_name.as_ref();
+                                                if let Ok(mut chain) =
+                                                    state.chains.get_chain(chain_name).await
+                                                {
+                                                    chain
+                                                        .chain_client
+                                                        .process_send_task(
+                                                            &init_hash,
+                                                            &send_task,
+                                                            &state.storage,
+                                                        )
+                                                        .await
+                                                        .ok();
+                                                }
                                             }
                                         }
-                                    }
-                                });
-                            }
-                            Status::Uncheck => {
-                                tokio::spawn(async move {
-                                    if let Ok(_lock_key) =
-                                        state.storage.try_lock_task(&init_hash).await
-                                    {
-                                        if let Ok(check_task) =
-                                            state.storage.load_check_task(&init_hash).await
-                                        {
-                                            let chain_name =
-                                                check_task.base_data.chain_name.as_ref();
-                                            if let Ok(mut chain) =
-                                                state.chains.get_chain(chain_name).await
+                                        Status::Uncheck => {
+                                            if let Ok(check_task) =
+                                                state.storage.load_check_task(&init_hash).await
                                             {
-                                                debug!("checking task: {}", &init_hash);
-                                                chain
-                                                    .chain_client
-                                                    .process_check_task(
-                                                        &init_hash,
-                                                        &check_task,
-                                                        &state.storage,
-                                                    )
-                                                    .await
-                                                    .ok();
+                                                let chain_name =
+                                                    check_task.base_data.chain_name.as_ref();
+                                                if let Ok(mut chain) =
+                                                    state.chains.get_chain(chain_name).await
+                                                {
+                                                    debug!("checking task: {}", &init_hash);
+                                                    chain
+                                                        .chain_client
+                                                        .process_check_task(
+                                                            &init_hash,
+                                                            &check_task,
+                                                            &state.storage,
+                                                        )
+                                                        .await
+                                                        .ok();
+                                                }
                                             }
                                         }
+                                        _ => {}
                                     }
-                                });
+                                }
+
+                                state.storage.unlock_task(&lock_key).await.ok();
                             }
-                            _ => {}
-                        }
+                        });
                     }
                 }
                 Err(e) => warn!("get_processing_tasks failed: {}", e),

@@ -190,11 +190,12 @@ impl Storage {
         Ok(())
     }
 
-    pub async fn get_processing_tasks(&self) -> Result<Vec<(String, Status)>> {
+    pub async fn get_processing_tasks(&self) -> Result<Vec<String>> {
         let config = get_config();
         // add limit for OutOfRange error
         let option = GetOptions::new()
             .with_prefix()
+            .with_keys_only()
             .with_limit(config.etcd_get_limit);
         let entries = self
             .operator
@@ -207,9 +208,7 @@ impl Storage {
             .filter_map(|e| {
                 if let Ok(key_str) = e.key_str() {
                     if let Some(init_hash) = key_str.split('/').last() {
-                        if let Ok(data) = serde_json::from_slice::<Status>(e.value()) {
-                            return Some((init_hash.to_owned(), data));
-                        }
+                        return Some(init_hash.to_owned());
                     }
                 }
                 None
@@ -235,7 +234,6 @@ impl Storage {
         Ok(lock_key)
     }
 
-    #[allow(dead_code)]
     pub async fn unlock_task(&self, lock_key: &[u8]) -> Result<()> {
         let mut write = self.operator.clone();
         write.unlock(lock_key).await?;
