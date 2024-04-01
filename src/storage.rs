@@ -197,7 +197,7 @@ impl Storage {
         let option = GetOptions::new()
             .with_prefix()
             .with_keys_only()
-            .with_limit(config.etcd_get_limit);
+            .with_limit(config.get_tasks_limit);
         let entries = self
             .operator
             .clone()

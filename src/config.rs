@@ -61,7 +61,7 @@ pub struct Config {
 
     pub max_timeout: u32,
 
-    pub etcd_get_limit: i64,
+    pub get_tasks_limit: i64,
 
     pub chain_config_ttl: i64,
 
@@ -87,7 +87,7 @@ impl Default for Config {
             log_config: Default::default(),
             max_timeout: 600,
             process_interval: 5,
-            etcd_get_limit: 20480,
+            get_tasks_limit: 2000,
             chain_config_ttl: 3,
             rpc_timeout: 1000,
             try_lock_timeout: 200,
