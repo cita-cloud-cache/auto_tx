@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use common_rs::{etcd::ServiceRegisterConfig, log::LogConfig};
+use common_rs::{
+    etcd::{EtcdConfig, ServiceRegisterConfig},
+    log::LogConfig,
+};
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 
@@ -58,13 +61,17 @@ pub struct Config {
 
     pub max_timeout: u32,
 
-    pub etcd_endpoints: Vec<String>,
-
-    pub etcd_get_limit: i64,
+    pub get_tasks_limit: i64,
 
     pub chain_config_ttl: i64,
 
+    pub request_key_ttl: i64,
+
     pub rpc_timeout: u64,
+
+    pub try_lock_timeout: u64,
+
+    pub etcd_config: EtcdConfig,
 
     pub cita_create_config: Option<CitaCreateConfig>,
 
@@ -80,13 +87,15 @@ impl Default for Config {
             log_config: Default::default(),
             max_timeout: 600,
             process_interval: 5,
-            etcd_endpoints: vec!["127.0.0.1:2379".to_string()],
-            etcd_get_limit: 20480,
+            get_tasks_limit: 2000,
             chain_config_ttl: 3,
             rpc_timeout: 1000,
+            try_lock_timeout: 200,
             cita_create_config: None,
+            etcd_config: Default::default(),
             service_register_config: Default::default(),
             fast_mode: false,
+            request_key_ttl: 600,
         }
     }
 }

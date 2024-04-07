@@ -167,7 +167,18 @@ pub async fn handle(
         return err(CALError::BadRequest, "field \"data\" missing");
     }
 
-    let request_key = user_code.to_string() + "-" + request_key;
+    let request_key = format!("{user_code}-{request_key}");
+
+    // check if request_key exists
+    if let Ok(init_hash) = state
+        .storage
+        .load_init_hash_by_request_key(&request_key)
+        .await
+    {
+        return ok(json!({
+            "hash": init_hash
+        }));
+    }
 
     // get Chain
     let mut chain = state.chains.get_chain(&chain_name).await?;
@@ -238,17 +249,24 @@ pub async fn handle(
         timeout,
     };
 
-    let (tx_hash, timeout, gas) = chain
+    let (init_hash, timeout, gas) = chain
         .chain_client
         .process_init_task(&init_task, &state.storage)
         .await?;
 
     info!(
         "receive send_tx request: request_key: {}, user_code: {}\n\tchain: {}\n\tfrom: {}, tx_data: {}\n\ttimeout: {}, gas: {}\n\tinitial hash: 0x{}",
-        request_key, user_code, chain, account.address_str(), tx_data, timeout, gas.gas, tx_hash
+        request_key, user_code, chain, account.address_str(), tx_data, timeout, gas.gas, init_hash
     );
 
+    // cache init_hash by request_key
+    state
+        .storage
+        .store_init_hash_by_request_key(&request_key, &init_hash)
+        .await
+        .ok();
+
     ok(json!({
-        "hash": tx_hash
+        "hash": init_hash
     }))
 }

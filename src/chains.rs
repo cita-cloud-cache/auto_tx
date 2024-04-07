@@ -17,7 +17,7 @@ use crate::{
     send_tx::{cita::CitaClient, cita_cloud::CitaCloudClient, eth::EthClient},
 };
 use color_eyre::eyre::{eyre, Result};
-use common_rs::etcd::Etcd;
+use common_rs::etcd::{Etcd, EtcdConfig};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 use tokio::sync::RwLock;
@@ -122,11 +122,11 @@ pub struct Chains {
 }
 
 impl Chains {
-    pub async fn new(endpoints: Vec<String>) -> Self {
+    pub async fn new(etcd_config: &EtcdConfig) -> Self {
         let chains = HashMap::new();
         Self {
             serve_chains: Arc::new(RwLock::new(chains)),
-            config_center: Etcd::new(endpoints).await.unwrap(),
+            config_center: Etcd::new(etcd_config).await.unwrap(),
         }
     }
 
