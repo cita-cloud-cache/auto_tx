@@ -151,7 +151,7 @@ impl Storage {
         let config = get_config();
         let mut conn = self.operator();
         let mut iter: AsyncIter<String> = conn
-            .scan_match(format!("{}/task/status/", config.name))
+            .scan_match(format!("{}/task/status/*", config.name))
             .await?;
 
         let mut keys = Vec::new();
