@@ -65,8 +65,10 @@ impl EthClient {
         if let Some(storage) = storage {
             if let Ok(gas_limit_bytes) = storage.operator().get(key.clone()).await {
                 let gas_limit_bytes: Vec<u8> = gas_limit_bytes;
-                let gas_limit = u64::from_be_bytes(gas_limit_bytes.try_into().unwrap());
-                return Ok(gas_limit);
+                if !gas_limit_bytes.is_empty() {
+                    let gas_limit = u64::from_be_bytes(gas_limit_bytes.try_into().unwrap());
+                    return Ok(gas_limit);
+                }
             }
         }
         let gas_limit = (self

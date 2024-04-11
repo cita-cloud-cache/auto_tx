@@ -128,10 +128,12 @@ impl CitaCloudClient {
         if let Some(storage) = storage {
             if let Ok(system_config_bytes) = storage.operator().get(key.clone()).await {
                 let system_config_bytes: Vec<u8> = system_config_bytes;
-                let system_config = SystemConfig::decode::<std::collections::VecDeque<u8>>(
-                    system_config_bytes.into(),
-                )?;
-                return Ok(system_config);
+                if !system_config_bytes.is_empty() {
+                    let system_config = SystemConfig::decode::<std::collections::VecDeque<u8>>(
+                        system_config_bytes.into(),
+                    )?;
+                    return Ok(system_config);
+                }
             }
         }
         let client = self.controller_client.get_client_mut();

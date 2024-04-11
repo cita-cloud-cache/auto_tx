@@ -65,8 +65,11 @@ impl CitaClient {
         if let Some(storage) = storage {
             if let Ok(block_interval_bytes) = storage.operator().get(key.clone()).await {
                 let block_interval_bytes: Vec<u8> = block_interval_bytes;
-                let block_interval = u64::from_be_bytes(block_interval_bytes.try_into().unwrap());
-                return Ok(block_interval);
+                if !block_interval_bytes.is_empty() {
+                    let block_interval =
+                        u64::from_be_bytes(block_interval_bytes.try_into().unwrap());
+                    return Ok(block_interval);
+                }
             }
         }
         let resp = self
@@ -111,8 +114,10 @@ impl CitaClient {
         if let Some(storage) = storage {
             if let Ok(gas_limit_bytes) = storage.operator().get(key.clone()).await {
                 let gas_limit_bytes: Vec<u8> = gas_limit_bytes;
-                let gas_limit = u64::from_be_bytes(gas_limit_bytes.try_into().unwrap());
-                return Ok(gas_limit);
+                if !gas_limit_bytes.is_empty() {
+                    let gas_limit = u64::from_be_bytes(gas_limit_bytes.try_into().unwrap());
+                    return Ok(gas_limit);
+                }
             }
         }
         let resp = self
@@ -159,8 +164,10 @@ impl CitaClient {
         if let Some(storage) = storage {
             if let Ok(version_bytes) = storage.operator().get(key.clone()).await {
                 let version_bytes: Vec<u8> = version_bytes;
-                let version = u32::from_be_bytes(version_bytes.try_into().unwrap());
-                return Ok(version);
+                if !version_bytes.is_empty() {
+                    let version = u32::from_be_bytes(version_bytes.try_into().unwrap());
+                    return Ok(version);
+                }
             }
         }
         let version = self
@@ -186,8 +193,10 @@ impl CitaClient {
         if let Some(storage) = storage {
             if let Ok(chain_id_bytes) = storage.operator().get(key.clone()).await {
                 let chain_id_bytes: Vec<u8> = chain_id_bytes;
-                let chain_id = u32::from_be_bytes(chain_id_bytes.try_into().unwrap());
-                return Ok(chain_id);
+                if !chain_id_bytes.is_empty() {
+                    let chain_id = u32::from_be_bytes(chain_id_bytes.try_into().unwrap());
+                    return Ok(chain_id);
+                }
             }
         }
         let chain_id = self
