@@ -15,7 +15,7 @@ get_tasks_limit = 2000
 
 [redis_config]
 endpoints = [
-    "127.0.0.1:2379",
+    "redis://127.0.0.1/",
 ]
 
 [service_register_config]
