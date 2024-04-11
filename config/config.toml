@@ -13,14 +13,10 @@ get_tasks_limit = 2000
 #verify = ""
 #dapp_name = ""
 
-[etcd_config]
+[redis_config]
 endpoints = [
     "127.0.0.1:2379",
 ]
-# millis
-timeout = 2000
-# secs
-keep_alive = 300
 
 [service_register_config]
 url = "http://auto_tx.chain-cache.svc.cluster.local:3000"

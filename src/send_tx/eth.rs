@@ -5,6 +5,7 @@ use crate::storage::Storage;
 use crate::task::*;
 use color_eyre::eyre::{eyre, Result};
 use common_rs::error::CALError;
+use common_rs::redis::AsyncCommands;
 use ethabi::ethereum_types::{H256, U64};
 use hex::ToHex;
 use web3::types::TransactionReceipt;
@@ -62,7 +63,8 @@ impl EthClient {
             self.chain_name
         );
         if let Some(storage) = storage {
-            if let Ok(gas_limit_bytes) = storage.get(key.clone()).await {
+            if let Ok(gas_limit_bytes) = storage.operator().get(key.clone()).await {
+                let gas_limit_bytes: Vec<u8> = gas_limit_bytes;
                 let gas_limit = u64::from_be_bytes(gas_limit_bytes.try_into().unwrap());
                 return Ok(gas_limit);
             }
@@ -79,9 +81,9 @@ impl EthClient {
         if let Some(storage) = storage {
             let gas_limit_bytes = gas_limit.to_be_bytes();
             storage
-                .put_with_lease(key, gas_limit_bytes, get_config().chain_config_ttl)
-                .await
-                .ok();
+                .operator()
+                .set_ex(key, &gas_limit_bytes, get_config().chain_config_ttl)
+                .await?;
         }
         Ok(gas_limit)
     }

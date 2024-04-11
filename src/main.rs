@@ -39,7 +39,12 @@ use crate::{
 use chains::Chains;
 use clap::Parser;
 use color_eyre::eyre::Result;
-use common_rs::{configure::file_config, etcd, log, restful::http_serve};
+use common_rs::{
+    configure::file_config,
+    log,
+    redis::{self, Redis},
+    restful::http_serve,
+};
 use config::{CitaCreateConfig, Config};
 use salvo::prelude::*;
 use send_tx::handle_send_tx;
@@ -100,9 +105,14 @@ pub struct AutoTxGlobalState {
 
 impl AutoTxGlobalState {
     async fn new(config: Config) -> Self {
+        let redis = Redis::new(&config.redis_config)
+            .await
+            .map_err(|e| error!("redis connect failed: {e}"))
+            .unwrap();
+
         Self {
-            chains: Chains::new(&config.etcd_config).await,
-            storage: Storage::new(&config.etcd_config).await,
+            chains: Chains::new(redis.clone()).await,
+            storage: Storage::new(redis).await,
             max_timeout: config.max_timeout,
             cita_create_config: config.cita_create_config,
         }
@@ -137,8 +147,9 @@ async fn run(opts: RunOpts) -> Result<()> {
     let process_interval = config.process_interval;
 
     if let Some(service_register_config) = &config.service_register_config {
-        let etcd = etcd::Etcd::new(&config.etcd_config).await?;
-        etcd.keep_service_register(&config.name, service_register_config.clone())
+        let redis = redis::Redis::new(&config.redis_config).await?;
+        redis
+            .service_register(&config.name, service_register_config.clone())
             .await
             .ok();
     }
@@ -160,7 +171,7 @@ async fn run(opts: RunOpts) -> Result<()> {
                         let state = state.clone();
 
                         tokio::spawn(async move {
-                            if let Ok(lock_key) = state.storage.try_lock_task(&init_hash).await {
+                            if state.storage.try_lock_task(&init_hash).await.is_ok() {
                                 if let Ok(status) = state.storage.load_status(&init_hash).await {
                                     match status {
                                         Status::Unsend => {
@@ -210,7 +221,7 @@ async fn run(opts: RunOpts) -> Result<()> {
                                     }
                                 }
 
-                                state.storage.unlock_task(&lock_key).await.ok();
+                                state.storage.unlock_task(&init_hash).await.ok();
                             }
                         });
                     }

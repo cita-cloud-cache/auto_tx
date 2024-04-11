@@ -10,6 +10,7 @@ use cita_tool::{
     UnverifiedTransaction,
 };
 use color_eyre::eyre::{eyre, Result};
+use common_rs::redis::AsyncCommands;
 use hex::ToHex;
 
 const CITA_BLOCK_LIMIT: u64 = 88;
@@ -62,7 +63,8 @@ impl CitaClient {
             self.chain_name
         );
         if let Some(storage) = storage {
-            if let Ok(block_interval_bytes) = storage.get(key.clone()).await {
+            if let Ok(block_interval_bytes) = storage.operator().get(key.clone()).await {
+                let block_interval_bytes: Vec<u8> = block_interval_bytes;
                 let block_interval = u64::from_be_bytes(block_interval_bytes.try_into().unwrap());
                 return Ok(block_interval);
             }
@@ -93,9 +95,9 @@ impl CitaClient {
         if let Some(storage) = storage {
             let block_interval_bytes = block_interval.to_be_bytes();
             storage
-                .put_with_lease(key, block_interval_bytes, get_config().chain_config_ttl)
-                .await
-                .ok();
+                .operator()
+                .set_ex(key, &block_interval_bytes, get_config().chain_config_ttl)
+                .await?;
         }
         Ok(block_interval)
     }
@@ -107,7 +109,8 @@ impl CitaClient {
             self.chain_name
         );
         if let Some(storage) = storage {
-            if let Ok(gas_limit_bytes) = storage.get(key.clone()).await {
+            if let Ok(gas_limit_bytes) = storage.operator().get(key.clone()).await {
+                let gas_limit_bytes: Vec<u8> = gas_limit_bytes;
                 let gas_limit = u64::from_be_bytes(gas_limit_bytes.try_into().unwrap());
                 return Ok(gas_limit);
             }
@@ -140,9 +143,9 @@ impl CitaClient {
         if let Some(storage) = storage {
             let gas_limit_bytes = gas_limit.to_be_bytes();
             storage
-                .put_with_lease(key, gas_limit_bytes, get_config().chain_config_ttl)
-                .await
-                .ok();
+                .operator()
+                .set_ex(key, &gas_limit_bytes, get_config().chain_config_ttl)
+                .await?;
         }
         Ok(gas_limit)
     }
@@ -154,7 +157,8 @@ impl CitaClient {
             self.chain_name
         );
         if let Some(storage) = storage {
-            if let Ok(version_bytes) = storage.get(key.clone()).await {
+            if let Ok(version_bytes) = storage.operator().get(key.clone()).await {
+                let version_bytes: Vec<u8> = version_bytes;
                 let version = u32::from_be_bytes(version_bytes.try_into().unwrap());
                 return Ok(version);
             }
@@ -166,9 +170,9 @@ impl CitaClient {
         if let Some(storage) = storage {
             let version_bytes = version.to_be_bytes();
             storage
-                .put_with_lease(key, version_bytes, get_config().chain_config_ttl)
-                .await
-                .ok();
+                .operator()
+                .set_ex(key, &version_bytes, get_config().chain_config_ttl)
+                .await?;
         }
         Ok(version)
     }
@@ -180,7 +184,8 @@ impl CitaClient {
             self.chain_name
         );
         if let Some(storage) = storage {
-            if let Ok(chain_id_bytes) = storage.get(key.clone()).await {
+            if let Ok(chain_id_bytes) = storage.operator().get(key.clone()).await {
+                let chain_id_bytes: Vec<u8> = chain_id_bytes;
                 let chain_id = u32::from_be_bytes(chain_id_bytes.try_into().unwrap());
                 return Ok(chain_id);
             }
@@ -192,9 +197,9 @@ impl CitaClient {
         if let Some(storage) = storage {
             let chain_id_bytes = chain_id.to_be_bytes();
             storage
-                .put_with_lease(key, chain_id_bytes, get_config().chain_config_ttl)
-                .await
-                .ok();
+                .operator()
+                .set_ex(key, &chain_id_bytes, get_config().chain_config_ttl)
+                .await?;
         }
         Ok(chain_id)
     }
@@ -205,7 +210,7 @@ impl CitaClient {
             self.chain_name
         );
         if let Some(storage) = storage {
-            if let Ok(chain_id_v1) = storage.get(key.clone()).await {
+            if let Ok(chain_id_v1) = storage.operator().get(key.clone()).await {
                 return Ok(chain_id_v1);
             }
         }
@@ -217,9 +222,9 @@ impl CitaClient {
         )?;
         if let Some(storage) = storage {
             storage
-                .put_with_lease(key, chain_id.clone(), get_config().chain_config_ttl)
-                .await
-                .ok();
+                .operator()
+                .set_ex(key, chain_id.clone(), get_config().chain_config_ttl)
+                .await?;
         }
         Ok(chain_id)
     }

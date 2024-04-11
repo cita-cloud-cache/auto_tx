@@ -1,59 +1,22 @@
-use std::time::Duration;
-
 use crate::{config::get_config, task::*};
 use color_eyre::eyre::{eyre, Result};
-use common_rs::etcd::EtcdConfig;
-use etcd_client::{Client, ConnectOptions, GetOptions, LockOptions, PutOptions};
+use common_rs::redis::{
+    AsyncCommands, AsyncIter, ExistenceCheck, Redis, RedisConnection, SetExpiry, SetOptions,
+};
 use paste::paste;
 
 #[derive(Clone)]
 pub struct Storage {
-    operator: Client,
+    operator: Redis,
 }
 
 impl Storage {
-    pub async fn new(config: &EtcdConfig) -> Self {
-        info!(" etcd config: {config:?}");
-        let operator = Client::connect(
-            &config.endpoints,
-            Some(
-                ConnectOptions::new()
-                    .with_connect_timeout(Duration::from_millis(config.timeout))
-                    .with_keep_alive(
-                        Duration::from_secs(config.keep_alive),
-                        Duration::from_millis(config.timeout),
-                    )
-                    .with_keep_alive_while_idle(true)
-                    .with_timeout(Duration::from_millis(config.timeout)),
-            ),
-        )
-        .await
-        .map_err(|e| println!("etcd connect failed: {e}"))
-        .unwrap();
+    pub async fn new(operator: Redis) -> Self {
         Self { operator }
     }
 
-    pub async fn put_with_lease(
-        &self,
-        key: impl Into<Vec<u8>>,
-        value: impl Into<Vec<u8>>,
-        ttl: i64,
-    ) -> Result<()> {
-        let mut storage = self.operator.clone();
-        let lease = storage.lease_grant(ttl, None).await?;
-        let option = PutOptions::new().with_lease(lease.id());
-        storage.put(key, value, Some(option)).await?;
-        Ok(())
-    }
-
-    pub async fn get(&self, key: impl Into<Vec<u8>>) -> Result<Vec<u8>> {
-        let mut storage = self.operator.clone();
-        let data_vec = storage.get(key, None).await?;
-        if let Some(kv) = data_vec.kvs().first() {
-            Ok(kv.value().to_vec())
-        } else {
-            Err(eyre!("data not found"))
-        }
+    pub fn operator(&self) -> RedisConnection {
+        self.operator.conn()
     }
 }
 
@@ -64,37 +27,30 @@ macro_rules! store_and_load {
                 pub($vis) async fn [<store_$var_name>](&self, init_hash: &str, data: &$data_type) -> Result<()> {
                     let json = serde_json::to_string(&data)?;
                     let path = format!("{}/{}/{}/{}", get_config().name, $dir, stringify!($var_name), init_hash);
-                    self.operator
-                        .clone()
-                        .put(path, json, None)
+                    self.operator()
+                        .set(path, json)
                         .await
-                        .map_err(|e| eyre!(e.to_string())).map(|_| ())
+                        .map_err(|e| eyre!(e.to_string()))
                 }
 
                 pub($vis) async fn [<load_$var_name>](&self, init_hash: &str) -> Result<$data_type> {
                     let path = format!("{}/{}/{}/{}", get_config().name, $dir, stringify!($var_name), init_hash);
-                    let data_vec = self
-                        .operator
-                        .clone()
-                        .get(path, None)
+                    let data_vec: String = self
+                        .operator()
+                        .get(path)
                         .await
                         .map_err(|e| eyre!(e.to_string()))?;
-                    if let Some(kv) = data_vec.kvs().first() {
-                        let data = serde_json::from_slice::<$data_type>(kv.value())?;
-                        Ok(data)
-                    } else {
-                        Err(eyre!("data not found"))
-                    }
+                    let data = serde_json::from_str::<$data_type>(&data_vec)?;
+                    Ok(data)
                 }
 
                 #[allow(unused)]
                 pub($vis) async fn [<delete_$var_name>](&self, init_hash: &str) -> Result<()> {
                     let path = format!("{}/{}/{}/{}", get_config().name, $dir, stringify!($var_name), init_hash);
-                    self.operator
-                        .clone()
-                        .delete(path, None)
+                    self.operator()
+                        .del(path)
                         .await
-                        .map_err(|e| eyre!(e.to_string())).map(|_| ())
+                        .map_err(|e| eyre!(e.to_string()))
                 }
             }
         }
@@ -193,52 +149,40 @@ impl Storage {
 
     pub async fn get_processing_tasks(&self) -> Result<Vec<String>> {
         let config = get_config();
-        // add limit for OutOfRange error
-        let option = GetOptions::new()
-            .with_prefix()
-            .with_keys_only()
-            .with_limit(config.get_tasks_limit);
-        let entries = self
-            .operator
-            .clone()
-            .get(format!("{}/task/status/", config.name), Some(option))
+        let mut conn = self.operator();
+        let mut iter: AsyncIter<String> = conn
+            .scan_match(format!("{}/task/status/", config.name))
             .await?;
-        let keys = entries
-            .kvs()
-            .iter()
-            .filter_map(|e| {
-                if let Ok(key_str) = e.key_str() {
-                    if let Some(init_hash) = key_str.split('/').last() {
-                        return Some(init_hash.to_owned());
-                    }
+
+        let mut keys = Vec::new();
+        for _ in 0..config.get_tasks_limit {
+            if let Some(key_str) = iter.next_item().await {
+                if let Some(init_hash) = key_str.split('/').last() {
+                    keys.push(init_hash.to_owned());
                 }
-                None
-            })
-            .collect();
+            } else {
+                break;
+            }
+        }
 
         Ok(keys)
     }
 
-    pub async fn try_lock_task(&self, init_hash: &str) -> Result<Vec<u8>> {
+    pub async fn try_lock_task(&self, init_hash: &str) -> Result<()> {
         let config = get_config();
-        let mut write = self.operator.clone();
-        let lease = write
-            .lease_grant(config.rpc_timeout as i64 * 2, None)
-            .await?;
-        let option = LockOptions::new().with_lease(lease.id());
+        let mut conn = self.operator();
         let key = format!("{}/locked_task/{}", config.name, init_hash);
-        let try_lock_timeout = tokio::time::timeout(
-            std::time::Duration::from_millis(config.try_lock_timeout),
-            write.lock(key, Some(option)),
-        );
-        let lock_key = try_lock_timeout.await??.key().to_vec();
-        Ok(lock_key)
+        let options = SetOptions::default()
+            .with_expiration(SetExpiry::EX((config.rpc_timeout * 2) as usize))
+            .conditional_set(ExistenceCheck::NX);
+        Ok(conn.set_options::<String, u8, ()>(key, 0, options).await?)
     }
 
-    pub async fn unlock_task(&self, lock_key: &[u8]) -> Result<()> {
-        let mut write = self.operator.clone();
-        write.unlock(lock_key).await?;
-        Ok(())
+    pub async fn unlock_task(&self, init_hash: &str) -> Result<()> {
+        let config = get_config();
+        let mut conn = self.operator();
+        let key = format!("{}/locked_task/{}", config.name, init_hash);
+        Ok(conn.del(key).await?)
     }
 
     pub async fn store_init_hash_by_request_key(
@@ -246,12 +190,12 @@ impl Storage {
         request_key: &str,
         init_hash: &str,
     ) -> Result<()> {
-        let mut storage = self.operator.clone();
+        let mut storage = self.operator();
         let config = get_config();
         let path = format!("{}/init_hash_by_request_key/{}", config.name, request_key);
-        let lease = storage.lease_grant(config.request_key_ttl, None).await?;
-        let option = PutOptions::new().with_lease(lease.id());
-        storage.put(path, init_hash, Some(option)).await?;
+        storage
+            .set_ex(path, init_hash, config.request_key_ttl)
+            .await?;
         Ok(())
     }
 
@@ -261,12 +205,9 @@ impl Storage {
             get_config().name,
             request_key
         );
-        let data_vec = self.operator.clone().get(path, None).await?;
-        if let Some(kv) = data_vec.kvs().first() {
-            let init_hash = kv.value_str()?.to_owned();
-            Ok(init_hash)
-        } else {
-            Err(eyre!("data not found"))
-        }
+        self.operator()
+            .get(path)
+            .await
+            .map_err(|e| eyre!("data not found: {e}"))
     }
 }

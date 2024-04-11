@@ -19,6 +19,7 @@ use cita_cloud_proto::executor::CallRequest;
 use cita_cloud_proto::retry::RetryClient;
 use cita_cloud_proto::status_code::StatusCodeEnum;
 use color_eyre::eyre::{eyre, Result};
+use common_rs::redis::AsyncCommands;
 use ethabi::ethereum_types::U256;
 use hex::ToHex;
 use prost::Message;
@@ -125,7 +126,8 @@ impl CitaCloudClient {
     async fn get_system_config(&mut self, storage: Option<&Storage>) -> Result<SystemConfig> {
         let key = format!("{}/ChainSysConfig/{}", get_config().name, self.chain_name);
         if let Some(storage) = storage {
-            if let Ok(system_config_bytes) = storage.get(key.clone()).await {
+            if let Ok(system_config_bytes) = storage.operator().get(key.clone()).await {
+                let system_config_bytes: Vec<u8> = system_config_bytes;
                 let system_config = SystemConfig::decode::<std::collections::VecDeque<u8>>(
                     system_config_bytes.into(),
                 )?;
@@ -144,9 +146,13 @@ impl CitaCloudClient {
                 buf
             };
             storage
-                .put_with_lease(key, system_config_bytes, get_config().chain_config_ttl)
-                .await
-                .ok();
+                .operator()
+                .set_ex(
+                    key,
+                    system_config_bytes,
+                    get_config().chain_config_ttl as u64,
+                )
+                .await?;
         }
         Ok(system_config)
     }
