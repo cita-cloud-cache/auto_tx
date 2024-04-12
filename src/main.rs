@@ -145,6 +145,7 @@ async fn run(opts: RunOpts) -> Result<()> {
     let port = config.port;
 
     let process_interval = config.process_interval;
+    let check_busy_interval = config.check_busy_interval;
 
     if let Some(service_register_config) = &config.service_register_config {
         let redis = redis::Redis::new(&config.redis_config).await?;
@@ -216,7 +217,7 @@ async fn run(opts: RunOpts) -> Result<()> {
                                 .process_check_task(&init_hash, &check_task, &state.storage)
                                 .await.is_err()
                             {
-                                tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+                                tokio::time::sleep(tokio::time::Duration::from_secs(check_busy_interval)).await;
                             }
                         }
                     }
