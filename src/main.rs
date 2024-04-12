@@ -211,12 +211,14 @@ async fn run(opts: RunOpts) -> Result<()> {
                         let chain_name = check_task.base_data.chain_name.as_ref();
                         if let Ok(mut chain) = state.chains.get_chain(chain_name).await {
                             debug!("checking task: {}", &init_hash);
-                            if chain
+                            if let Err(e) = chain
                                 .chain_client
                                 .process_check_task(&init_hash, &check_task, &state.storage)
-                                .await.is_err()
+                                .await
                             {
-                                tokio::time::sleep(tokio::time::Duration::from_millis(check_busy_interval)).await;
+                                if e.to_string().contains("rpc timeout") {
+                                    tokio::time::sleep(tokio::time::Duration::from_millis(check_busy_interval)).await;
+                                }
                             }
                         }
                     }
