@@ -163,7 +163,6 @@ async fn run(opts: RunOpts) -> Result<()> {
         .push(Router::with_path("/api/<chain_name>/receipt/<hash>").get(get_receipt_handler))
         .push(Router::with_path("/api/task/<hash>").get(get_task_handler));
 
-    let (send_task_tx, send_task_rx) = flume::unbounded();
     let (check_task_tx, check_task_rx) = flume::unbounded();
 
     tokio::spawn(async move {
@@ -178,7 +177,22 @@ async fn run(opts: RunOpts) -> Result<()> {
                                 if let Ok(status) = state.storage.load_status(&init_hash).await {
                                     match status {
                                         Status::Unsend => {
-                                            send_task_tx.send(init_hash).unwrap();
+                                            let state = state.clone();
+                                            tokio::spawn(async move {
+                                                if let Ok(send_task) = state.storage.load_send_task(&init_hash).await {
+                                                    if state.storage.try_lock_task(&init_hash).await.is_ok() {
+                                                        let chain_name = send_task.base_data.chain_name.as_ref();
+                                                        if let Ok(mut chain) = state.chains.get_chain(chain_name).await {
+                                                            chain
+                                                                .chain_client
+                                                                .process_send_task(&init_hash, &send_task, &state.storage)
+                                                                .await
+                                                                .ok();
+                                                        }
+                                                        state.storage.unlock_task(&init_hash).await.ok();
+                                                    }
+                                                }
+                                            });
                                         }
                                         Status::Uncheck => {
                                             check_task_tx.send(init_hash).unwrap();
@@ -189,21 +203,6 @@ async fn run(opts: RunOpts) -> Result<()> {
                             }
                         }
                         Err(e) => warn!("get_processing_tasks failed: {}", e),
-                    }
-                },
-                Ok(init_hash) = send_task_rx.recv_async() => {
-                    if state.storage.try_lock_task(&init_hash).await.is_ok() {
-                        if let Ok(send_task) = state.storage.load_send_task(&init_hash).await {
-                            let chain_name = send_task.base_data.chain_name.as_ref();
-                            if let Ok(mut chain) = state.chains.get_chain(chain_name).await {
-                                chain
-                                    .chain_client
-                                    .process_send_task(&init_hash, &send_task, &state.storage)
-                                    .await
-                                    .ok();
-                            }
-                        }
-                        state.storage.unlock_task(&init_hash).await.ok();
                     }
                 },
                 Ok(init_hash) = check_task_rx.recv_async() => {
@@ -217,7 +216,7 @@ async fn run(opts: RunOpts) -> Result<()> {
                                 .process_check_task(&init_hash, &check_task, &state.storage)
                                 .await.is_err()
                             {
-                                tokio::time::sleep(tokio::time::Duration::from_secs(check_busy_interval)).await;
+                                tokio::time::sleep(tokio::time::Duration::from_millis(check_busy_interval)).await;
                             }
                         }
                     }
