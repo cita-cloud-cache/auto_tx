@@ -145,7 +145,6 @@ async fn run(opts: RunOpts) -> Result<()> {
     let port = config.port;
 
     let process_interval = config.process_interval;
-    let check_busy_interval = config.check_busy_interval;
 
     if let Some(service_register_config) = &config.service_register_config {
         let redis = redis::Redis::new(&config.redis_config).await?;
@@ -210,14 +209,13 @@ async fn run(opts: RunOpts) -> Result<()> {
                     if let Ok(check_task) = state.storage.load_check_task(&init_hash).await {
                         let chain_name = check_task.base_data.chain_name.as_ref();
                         if let Ok(mut chain) = state.chains.get_chain(chain_name).await {
-                            debug!("checking task: {}", &init_hash);
                             if let Err(e) = chain
                                 .chain_client
                                 .process_check_task(&init_hash, &check_task, &state.storage)
                                 .await
                             {
                                 if e.to_string().contains("rpc timeout") {
-                                    tokio::time::sleep(tokio::time::Duration::from_millis(check_busy_interval)).await;
+                                    while check_task_rx.try_recv().is_ok() {}
                                 }
                             }
                         }
