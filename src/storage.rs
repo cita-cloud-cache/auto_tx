@@ -85,26 +85,32 @@ impl Storage {
     }
 
     pub async fn load_send_task(&self, init_hash: &str) -> Result<SendTask> {
-        let send_task = SendTask {
-            base_data: self.load_base_data(init_hash).await?,
-            timeout: self.load_timeout(init_hash).await?,
-            gas: self.load_gas(init_hash).await?,
-            raw_transaction_bytes: self.load_raw_transaction_bytes(init_hash).await.ok(),
-        };
-
-        Ok(send_task)
+        if let Ok(Status::Unsend) = self.load_status(init_hash).await {
+            let send_task = SendTask {
+                base_data: self.load_base_data(init_hash).await?,
+                timeout: self.load_timeout(init_hash).await?,
+                gas: self.load_gas(init_hash).await?,
+                raw_transaction_bytes: self.load_raw_transaction_bytes(init_hash).await.ok(),
+            };
+            Ok(send_task)
+        } else {
+            Err(eyre!("task status is not Unsend"))
+        }
     }
 
     pub async fn load_check_task(&self, init_hash: &str) -> Result<CheckTask> {
-        let base_data = self.load_base_data(init_hash).await?;
-        let hash_to_check = self.load_hash_to_check(init_hash).await?;
+        if let Ok(Status::Uncheck) = self.load_status(init_hash).await {
+            let base_data = self.load_base_data(init_hash).await?;
+            let hash_to_check = self.load_hash_to_check(init_hash).await?;
 
-        let check_task = CheckTask {
-            base_data,
-            hash_to_check,
-        };
-
-        Ok(check_task)
+            let check_task = CheckTask {
+                base_data,
+                hash_to_check,
+            };
+            Ok(check_task)
+        } else {
+            Err(eyre!("task status is not Uncheck"))
+        }
     }
 
     pub async fn load_task(&self, init_hash: &str) -> Result<Task> {
