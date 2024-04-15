@@ -146,6 +146,7 @@ async fn run(opts: RunOpts) -> Result<()> {
 
     let process_interval = config.process_interval;
     let check_workers_num = config.check_workers_num;
+    let send_workers_num = config.send_workers_num;
 
     if let Some(service_register_config) = &config.service_register_config {
         let redis = redis::Redis::new(&config.redis_config).await?;
@@ -163,6 +164,7 @@ async fn run(opts: RunOpts) -> Result<()> {
         .push(Router::with_path("/api/<chain_name>/receipt/<hash>").get(get_receipt_handler))
         .push(Router::with_path("/api/task/<hash>").get(get_task_handler));
 
+    let (send_task_tx, send_task_rx) = flume::unbounded::<String>();
     let (check_task_tx, check_task_rx) = flume::unbounded::<String>();
 
     for _ in 0..check_workers_num {
@@ -189,6 +191,28 @@ async fn run(opts: RunOpts) -> Result<()> {
         });
     }
 
+    for _ in 0..send_workers_num {
+        let state = state.clone();
+        let send_task_rx = send_task_rx.clone();
+        tokio::spawn(async move {
+            while let Ok(init_hash) = send_task_rx.recv_async().await {
+                if let Ok(send_task) = state.storage.load_send_task(&init_hash).await {
+                    if state.storage.try_lock_task(&init_hash).await.is_ok() {
+                        let chain_name = send_task.base_data.chain_name.as_ref();
+                        if let Ok(mut chain) = state.chains.get_chain(chain_name).await {
+                            chain
+                                .chain_client
+                                .process_send_task(&init_hash, &send_task, &state.storage)
+                                .await
+                                .ok();
+                        }
+                        state.storage.unlock_task(&init_hash).await.ok();
+                    }
+                }
+            }
+        });
+    }
+
     tokio::spawn(async move {
         let mut process_interval =
             tokio::time::interval(tokio::time::Duration::from_secs(process_interval));
@@ -200,35 +224,10 @@ async fn run(opts: RunOpts) -> Result<()> {
                         if let Ok(status) = state.storage.load_status(&init_hash).await {
                             match status {
                                 Status::Unsend => {
-                                    let state = state.clone();
-                                    tokio::spawn(async move {
-                                        if let Ok(send_task) =
-                                            state.storage.load_send_task(&init_hash).await
-                                        {
-                                            if state.storage.try_lock_task(&init_hash).await.is_ok()
-                                            {
-                                                let chain_name =
-                                                    send_task.base_data.chain_name.as_ref();
-                                                if let Ok(mut chain) =
-                                                    state.chains.get_chain(chain_name).await
-                                                {
-                                                    chain
-                                                        .chain_client
-                                                        .process_send_task(
-                                                            &init_hash,
-                                                            &send_task,
-                                                            &state.storage,
-                                                        )
-                                                        .await
-                                                        .ok();
-                                                }
-                                                state.storage.unlock_task(&init_hash).await.ok();
-                                            }
-                                        }
-                                    });
+                                    send_task_tx.send_async(init_hash).await.ok();
                                 }
                                 Status::Uncheck => {
-                                    check_task_tx.send(init_hash).unwrap();
+                                    check_task_tx.send_async(init_hash).await.ok();
                                 }
                                 _ => {}
                             }
