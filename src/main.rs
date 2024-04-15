@@ -145,6 +145,7 @@ async fn run(opts: RunOpts) -> Result<()> {
     let port = config.port;
 
     let process_interval = config.process_interval;
+    let check_workers_num = config.check_workers_num;
 
     if let Some(service_register_config) = &config.service_register_config {
         let redis = redis::Redis::new(&config.redis_config).await?;
@@ -162,65 +163,79 @@ async fn run(opts: RunOpts) -> Result<()> {
         .push(Router::with_path("/api/<chain_name>/receipt/<hash>").get(get_receipt_handler))
         .push(Router::with_path("/api/task/<hash>").get(get_task_handler));
 
-    let (check_task_tx, check_task_rx) = flume::unbounded();
+    let (check_task_tx, check_task_rx) = flume::unbounded::<String>();
+
+    for _ in 0..check_workers_num {
+        let state = state.clone();
+        let check_task_rx = check_task_rx.clone();
+        tokio::spawn(async move {
+            while let Ok(init_hash) = check_task_rx.recv_async().await {
+                debug!("checking task: {}", &init_hash);
+                if let Ok(check_task) = state.storage.load_check_task(&init_hash).await {
+                    let chain_name = check_task.base_data.chain_name.as_ref();
+                    if let Ok(mut chain) = state.chains.get_chain(chain_name).await {
+                        if let Err(e) = chain
+                            .chain_client
+                            .process_check_task(&init_hash, &check_task, &state.storage)
+                            .await
+                        {
+                            if e.to_string().contains("rpc timeout") {
+                                check_task_rx.drain();
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
 
     tokio::spawn(async move {
         let mut process_interval =
             tokio::time::interval(tokio::time::Duration::from_secs(process_interval));
         loop {
-            tokio::select! {
-                _ = process_interval.tick() => {
-                    match state.storage.get_processing_tasks().await {
-                        Ok(processing) => {
-                            for init_hash in processing {
-                                if let Ok(status) = state.storage.load_status(&init_hash).await {
-                                    match status {
-                                        Status::Unsend => {
-                                            let state = state.clone();
-                                            tokio::spawn(async move {
-                                                if let Ok(send_task) = state.storage.load_send_task(&init_hash).await {
-                                                    if state.storage.try_lock_task(&init_hash).await.is_ok() {
-                                                        let chain_name = send_task.base_data.chain_name.as_ref();
-                                                        if let Ok(mut chain) = state.chains.get_chain(chain_name).await {
-                                                            chain
-                                                                .chain_client
-                                                                .process_send_task(&init_hash, &send_task, &state.storage)
-                                                                .await
-                                                                .ok();
-                                                        }
-                                                        state.storage.unlock_task(&init_hash).await.ok();
-                                                    }
+            process_interval.tick().await;
+            match state.storage.get_processing_tasks().await {
+                Ok(processing) => {
+                    for init_hash in processing {
+                        if let Ok(status) = state.storage.load_status(&init_hash).await {
+                            match status {
+                                Status::Unsend => {
+                                    let state = state.clone();
+                                    tokio::spawn(async move {
+                                        if let Ok(send_task) =
+                                            state.storage.load_send_task(&init_hash).await
+                                        {
+                                            if state.storage.try_lock_task(&init_hash).await.is_ok()
+                                            {
+                                                let chain_name =
+                                                    send_task.base_data.chain_name.as_ref();
+                                                if let Ok(mut chain) =
+                                                    state.chains.get_chain(chain_name).await
+                                                {
+                                                    chain
+                                                        .chain_client
+                                                        .process_send_task(
+                                                            &init_hash,
+                                                            &send_task,
+                                                            &state.storage,
+                                                        )
+                                                        .await
+                                                        .ok();
                                                 }
-                                            });
+                                                state.storage.unlock_task(&init_hash).await.ok();
+                                            }
                                         }
-                                        Status::Uncheck => {
-                                            check_task_tx.send(init_hash).unwrap();
-                                        }
-                                        _ => {}
-                                    }
+                                    });
                                 }
-                            }
-                        }
-                        Err(e) => warn!("get_processing_tasks failed: {}", e),
-                    }
-                },
-                Ok(init_hash) = check_task_rx.recv_async() => {
-                    debug!("checking task: {}", &init_hash);
-                    if let Ok(check_task) = state.storage.load_check_task(&init_hash).await {
-                        let chain_name = check_task.base_data.chain_name.as_ref();
-                        if let Ok(mut chain) = state.chains.get_chain(chain_name).await {
-                            if let Err(e) = chain
-                                .chain_client
-                                .process_check_task(&init_hash, &check_task, &state.storage)
-                                .await
-                            {
-                                if e.to_string().contains("rpc timeout") {
-                                    while check_task_rx.try_recv().is_ok() {}
+                                Status::Uncheck => {
+                                    check_task_tx.send(init_hash).unwrap();
                                 }
+                                _ => {}
                             }
                         }
                     }
                 }
+                Err(e) => warn!("get_processing_tasks failed: {}", e),
             }
         }
     });

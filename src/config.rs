@@ -54,6 +54,8 @@ pub struct Config {
 
     pub process_interval: u64,
 
+    pub check_workers_num: u64,
+
     pub fast_mode: bool,
 
     pub max_timeout: u32,
@@ -84,6 +86,7 @@ impl Default for Config {
             log_config: Default::default(),
             max_timeout: 600,
             process_interval: 5,
+            check_workers_num: 10,
             get_tasks_limit: 2000,
             chain_config_ttl: 3,
             rpc_timeout: 1000,
