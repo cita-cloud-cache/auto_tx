@@ -56,20 +56,17 @@ impl CitaClient {
         })
     }
 
-    async fn get_block_interval(&self, storage: Option<&Storage>) -> Result<u64> {
+    async fn get_block_interval(&self, storage: &Storage) -> Result<u64> {
         let key = format!(
             "{}/ChainSysConfig/{}/block_interval",
             get_config().name,
             self.chain_name
         );
-        if let Some(storage) = storage {
-            if let Ok(block_interval_bytes) = storage.operator().get(key.clone()).await {
-                let block_interval_bytes: Vec<u8> = block_interval_bytes;
-                if !block_interval_bytes.is_empty() {
-                    let block_interval =
-                        u64::from_be_bytes(block_interval_bytes.try_into().unwrap());
-                    return Ok(block_interval);
-                }
+        if let Ok(block_interval_bytes) = storage.operator().get(key.clone()).await {
+            let block_interval_bytes: Vec<u8> = block_interval_bytes;
+            if !block_interval_bytes.is_empty() {
+                let block_interval = u64::from_be_bytes(block_interval_bytes.try_into().unwrap());
+                return Ok(block_interval);
             }
         }
         let resp = self
@@ -95,13 +92,11 @@ impl CitaClient {
                 ))
             }
         };
-        if let Some(storage) = storage {
-            let block_interval_bytes = block_interval.to_be_bytes();
-            storage
-                .operator()
-                .set_ex(key, &block_interval_bytes, get_config().chain_config_ttl)
-                .await?;
-        }
+        let block_interval_bytes = block_interval.to_be_bytes();
+        storage
+            .operator()
+            .set_ex(key, &block_interval_bytes, get_config().chain_config_ttl)
+            .await?;
         Ok(block_interval)
     }
 
@@ -342,7 +337,7 @@ impl CitaClient {
     pub async fn try_update_timeout(
         &mut self,
         timeout: Timeout,
-        storage: Option<&Storage>,
+        storage: &Storage,
     ) -> Result<Timeout> {
         let mut timeout = timeout.get_cita_timeout();
 
@@ -387,11 +382,7 @@ impl CitaClient {
         }
     }
 
-    pub async fn estimate_gas(
-        &mut self,
-        init_task: &InitTaskParam,
-        storage: Option<&Storage>,
-    ) -> Gas {
+    pub async fn estimate_gas(&mut self, init_task: &InitTaskParam, storage: &Storage) -> Gas {
         match init_task.base_data.tx_data.tx_type() {
             TxType::Store => Gas {
                 // 200 gas per byte
@@ -401,7 +392,7 @@ impl CitaClient {
             TxType::Create => Gas { gas: DEFAULT_QUOTA },
             TxType::Normal => {
                 let quota_limit = self
-                    .get_gas_limit(storage)
+                    .get_gas_limit(Some(storage))
                     .await
                     .unwrap_or(DEFAULT_QUOTA_LIMIT);
                 let to_vec = init_task.base_data.tx_data.to.clone();
@@ -443,10 +434,14 @@ impl AutoTx for CitaClient {
             remain_time: init_task.timeout,
             valid_until_block: 0,
         });
-        let timeout = self.try_update_timeout(timeout, Some(storage)).await?;
+        let timeout = self.try_update_timeout(timeout, storage).await?;
 
         // get Gas
-        let gas = self.estimate_gas(init_task, Some(storage)).await;
+        let gas = if init_task.gas <= BASE_QUOTA {
+            self.estimate_gas(init_task, storage).await
+        } else {
+            Gas { gas: init_task.gas }
+        };
 
         // get tx
         let mut send_task = SendTask {
@@ -572,7 +567,7 @@ impl AutoTx for CitaClient {
                     e.to_string(),
                     timeout.get_cita_timeout().remain_time
                 );
-                match self.try_update_timeout(timeout, Some(storage)).await {
+                match self.try_update_timeout(timeout, storage).await {
                     Ok(new_timeout) => {
                         if timeout != new_timeout {
                             storage.store_timeout(init_hash, &new_timeout).await?;
@@ -682,7 +677,7 @@ impl AutoTx for CitaClient {
                     e.to_string(),
                     timeout.get_cita_timeout().remain_time
                 );
-                match self.try_update_timeout(timeout, Some(storage)).await {
+                match self.try_update_timeout(timeout, storage).await {
                     Ok(new_timeout) => {
                         if timeout != new_timeout {
                             storage.store_timeout(init_hash, &new_timeout).await?;

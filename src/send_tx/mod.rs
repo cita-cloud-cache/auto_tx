@@ -247,6 +247,7 @@ pub async fn handle(
             tx_data: tx_data.clone(),
         },
         timeout,
+        gas: params.gas.unwrap_or_default(),
     };
 
     let (init_hash, timeout, gas) = chain

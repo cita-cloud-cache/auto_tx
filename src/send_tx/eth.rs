@@ -1,4 +1,4 @@
-use super::{AutoTx, DEFAULT_QUOTA};
+use super::{AutoTx, BASE_QUOTA, DEFAULT_QUOTA};
 use crate::config::get_config;
 use crate::kms::Account;
 use crate::storage::Storage;
@@ -178,7 +178,12 @@ impl AutoTx for EthClient {
         let timeout = self.try_update_timeout(from, timeout).await?;
 
         // get Gas
-        let gas = self.estimate_gas(init_task).await;
+        let gas = if init_task.gas <= BASE_QUOTA {
+            self.estimate_gas(init_task).await
+        } else {
+            Gas { gas: init_task.gas }
+        };
+
         // get tx
         let mut send_task = SendTask {
             base_data: init_task.base_data.clone(),

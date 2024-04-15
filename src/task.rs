@@ -151,6 +151,7 @@ pub struct BaseData {
 pub struct InitTaskParam {
     pub base_data: BaseData,
     pub timeout: u32,
+    pub gas: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

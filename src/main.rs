@@ -167,6 +167,7 @@ async fn run(opts: RunOpts) -> Result<()> {
     let (send_task_tx, send_task_rx) = flume::unbounded::<String>();
     let (check_task_tx, check_task_rx) = flume::unbounded::<String>();
 
+    // spawn check task workers
     for _ in 0..check_workers_num {
         let state = state.clone();
         let check_task_rx = check_task_rx.clone();
@@ -191,6 +192,7 @@ async fn run(opts: RunOpts) -> Result<()> {
         });
     }
 
+    // spawn send task workers
     for _ in 0..send_workers_num {
         let state = state.clone();
         let send_task_rx = send_task_rx.clone();
@@ -213,6 +215,7 @@ async fn run(opts: RunOpts) -> Result<()> {
         });
     }
 
+    // read and distribute tasks proactively
     tokio::spawn(async move {
         let mut process_interval =
             tokio::time::interval(tokio::time::Duration::from_secs(process_interval));
@@ -256,4 +259,7 @@ pub struct RequestParams {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     timeout: Option<u32>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    gas: Option<u64>,
 }

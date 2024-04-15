@@ -289,7 +289,11 @@ impl AutoTx for CitaCloudClient {
         let timeout = self.try_update_timeout(timeout, storage).await?;
 
         // get Gas
-        let gas = self.estimate_gas(init_task, storage).await;
+        let gas = if init_task.gas <= BASE_QUOTA {
+            self.estimate_gas(init_task, storage).await
+        } else {
+            Gas { gas: init_task.gas }
+        };
 
         // get tx
         let mut send_task = SendTask {
