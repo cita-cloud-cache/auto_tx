@@ -54,6 +54,8 @@ pub struct Config {
 
     pub process_interval: u64,
 
+    pub check_error_interval: u64,
+
     pub check_workers_num: u64,
 
     pub send_workers_num: u64,
@@ -86,6 +88,7 @@ impl Default for Config {
             log_config: Default::default(),
             max_timeout: 600,
             process_interval: 5,
+            check_error_interval: 1,
             check_workers_num: 5,
             send_workers_num: 10,
             chain_config_ttl: 3,

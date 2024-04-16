@@ -147,6 +147,7 @@ async fn run(opts: RunOpts) -> Result<()> {
         name,
         port,
         process_interval,
+        check_error_interval,
         check_workers_num,
         send_workers_num,
         ..
@@ -176,19 +177,20 @@ async fn run(opts: RunOpts) -> Result<()> {
         let state = state.clone();
         let check_task_rx = check_task_rx.clone();
         tokio::spawn(async move {
+            let mut check_error_interval =
+                tokio::time::interval(tokio::time::Duration::from_secs(check_error_interval));
             while let Ok(init_hash) = check_task_rx.recv_async().await {
                 debug!("checking task: {}", &init_hash);
                 if let Ok(check_task) = state.storage.load_check_task(&init_hash).await {
                     let chain_name = check_task.base_data.chain_name.as_ref();
                     if let Ok(mut chain) = state.chains.get_chain(chain_name).await {
-                        if let Err(e) = chain
+                        if chain
                             .chain_client
                             .process_check_task(&init_hash, &check_task, &state.storage)
                             .await
+                            .is_err()
                         {
-                            if e.to_string().contains("rpc timeout") {
-                                check_task_rx.drain();
-                            }
+                            check_error_interval.tick().await;
                         }
                     }
                 }
