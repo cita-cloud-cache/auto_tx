@@ -1,7 +1,7 @@
 use crate::{config::get_config, task::*};
 use color_eyre::eyre::{eyre, Result};
 use common_rs::redis::{
-    AsyncCommands, AsyncIter, ExistenceCheck, Redis, RedisConnection, SetExpiry, SetOptions,
+    AsyncCommands, ExistenceCheck, Redis, RedisConnection, SetExpiry, SetOptions,
 };
 use paste::paste;
 
@@ -151,27 +151,6 @@ impl Storage {
         self.store_task_result(init_hash, auto_tx_result).await?;
 
         Ok(())
-    }
-
-    pub async fn get_processing_tasks(&self) -> Result<Vec<String>> {
-        let config = get_config();
-        let mut conn = self.operator();
-        let mut iter: AsyncIter<String> = conn
-            .scan_match(format!("{}/task/status/*", config.name))
-            .await?;
-
-        let mut keys = Vec::new();
-        for _ in 0..config.get_tasks_limit {
-            if let Some(key_str) = iter.next_item().await {
-                if let Some(init_hash) = key_str.split('/').last() {
-                    keys.push(init_hash.to_owned());
-                }
-            } else {
-                break;
-            }
-        }
-
-        Ok(keys)
     }
 
     pub async fn try_lock_task(&self, init_hash: &str) -> Result<()> {

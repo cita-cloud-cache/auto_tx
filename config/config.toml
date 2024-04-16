@@ -1,7 +1,6 @@
 name = "auto_tx"
 port = 3000
 kms_url = "http://api.rivtower.cc/rivtrust-kms"
-get_tasks_limit = 2000
 
 #[cita_create_config]
 #chain_name = ""

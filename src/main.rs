@@ -42,7 +42,7 @@ use color_eyre::eyre::Result;
 use common_rs::{
     configure::file_config,
     log,
-    redis::{self, Redis},
+    redis::{self, AsyncCommands, Redis},
     restful::http_serve,
 };
 use config::{CitaCreateConfig, Config};
@@ -142,16 +142,20 @@ async fn run(opts: RunOpts) -> Result<()> {
     }
 
     let service_name = config.name.clone();
-    let port = config.port;
 
-    let process_interval = config.process_interval;
-    let check_workers_num = config.check_workers_num;
-    let send_workers_num = config.send_workers_num;
+    let Config {
+        name,
+        port,
+        process_interval,
+        check_workers_num,
+        send_workers_num,
+        ..
+    } = config.clone();
 
     if let Some(service_register_config) = &config.service_register_config {
         let redis = redis::Redis::new(&config.redis_config).await?;
         redis
-            .service_register(&config.name, service_register_config.clone())
+            .service_register(&service_name, service_register_config.clone())
             .await
             .ok();
     }
@@ -219,25 +223,28 @@ async fn run(opts: RunOpts) -> Result<()> {
     tokio::spawn(async move {
         let mut process_interval =
             tokio::time::interval(tokio::time::Duration::from_secs(process_interval));
+        let mut conn = state.storage.operator();
         loop {
             process_interval.tick().await;
-            match state.storage.get_processing_tasks().await {
-                Ok(processing) => {
-                    for init_hash in processing {
-                        if let Ok(status) = state.storage.load_status(&init_hash).await {
+            if let Ok(mut iter) = conn
+                .scan_match::<String, String>(format!("{}/task/status/*", name))
+                .await
+            {
+                while let Some(key_str) = iter.next_item().await {
+                    if let Some(init_hash) = key_str.split('/').last() {
+                        if let Ok(status) = state.storage.load_status(init_hash).await {
                             match status {
                                 Status::Unsend => {
-                                    send_task_tx.send_async(init_hash).await.ok();
+                                    send_task_tx.send_async(init_hash.to_string()).await.ok();
                                 }
                                 Status::Uncheck => {
-                                    check_task_tx.send_async(init_hash).await.ok();
+                                    check_task_tx.send_async(init_hash.to_string()).await.ok();
                                 }
                                 _ => {}
                             }
                         }
                     }
                 }
-                Err(e) => warn!("get_processing_tasks failed: {}", e),
             }
         }
     });

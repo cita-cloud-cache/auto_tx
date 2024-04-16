@@ -62,8 +62,6 @@ pub struct Config {
 
     pub max_timeout: u32,
 
-    pub get_tasks_limit: i64,
-
     pub chain_config_ttl: u64,
 
     pub request_key_ttl: u64,
@@ -90,7 +88,6 @@ impl Default for Config {
             process_interval: 5,
             check_workers_num: 5,
             send_workers_num: 10,
-            get_tasks_limit: 2000,
             chain_config_ttl: 3,
             rpc_timeout: 1000,
             try_lock_timeout: 200,
