@@ -1,7 +1,7 @@
-use crate::{config::get_config, task::*};
+use crate::{config::get_config, hlc, task::*};
 use color_eyre::eyre::{eyre, Result};
 use common_rs::redis::{
-    AsyncCommands, ExistenceCheck, Redis, RedisConnection, SetExpiry, SetOptions,
+    streams, AsyncCommands, ExistenceCheck, Redis, RedisConnection, SetExpiry, SetOptions,
 };
 use paste::paste;
 
@@ -71,6 +71,53 @@ store_and_load!(
 store_and_load!(crate, TaskResult, task_result, "result");
 
 impl Storage {
+    pub async fn update_status(&self, init_hash: &str, status: &Status) -> Result<()> {
+        self.store_status(init_hash, status).await?;
+        let mut conn = self.operator();
+        let key = format!("{}/processing/{:?}/", get_config().name, status);
+        conn.xadd::<&str, &str, &str, &str, ()>(
+            &key,
+            &format!("{}", hlc().new_timestamp()),
+            &[(init_hash, "")],
+        )
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn read_processing_task(&self) -> Result<(Vec<String>, Vec<String>)> {
+        let mut conn = self.operator();
+        let config = get_config();
+
+        let keys = &[
+            &format!("{}/processing/{:?}/", config.name, Status::Unsend),
+            &format!("{}/processing/{:?}/", config.name, Status::Uncheck),
+        ];
+
+        let _: Result<(), _> = conn.xgroup_create_mkstream(keys, &config.name, "$").await;
+
+        let opts = streams::StreamReadOptions::default()
+            .group(config.name.clone(), format!("{}", hlc().get_id()))
+            .count(config.read_processing_num);
+
+        let iter: streams::StreamReadReply = conn.xread_options(keys, &[">", ">"], &opts).await?;
+
+        let mut send_tasks = vec![];
+        let mut check_tasks = vec![];
+
+        for key in iter.keys {
+            if &key.key == keys[0] {
+                send_tasks.extend(key.ids.iter().flat_map(|id| id.map.keys().cloned()));
+                continue;
+            }
+            if &key.key == keys[1] {
+                check_tasks.extend(key.ids.iter().flat_map(|id| id.map.keys().cloned()));
+            }
+        }
+
+        Ok((send_tasks, check_tasks))
+    }
+
     pub async fn store_send_task(&self, init_hash: &str, task: &SendTask) -> Result<()> {
         self.store_base_data(init_hash, &task.base_data).await?;
         self.store_timeout(init_hash, &task.timeout).await?;
@@ -79,7 +126,7 @@ impl Storage {
             self.store_raw_transaction_bytes(init_hash, raw_transaction_bytes)
                 .await?;
         }
-        self.store_status(init_hash, &Status::Unsend).await?;
+        self.update_status(init_hash, &Status::Unsend).await?;
 
         Ok(())
     }
@@ -138,7 +185,7 @@ impl Storage {
         self.delete_hash_to_check(init_hash).await?;
         // need rebuild the transaction
         self.delete_raw_transaction_bytes(init_hash).await?;
-        self.store_status(init_hash, &Status::Unsend).await?;
+        self.update_status(init_hash, &Status::Unsend).await?;
         Ok(())
     }
 

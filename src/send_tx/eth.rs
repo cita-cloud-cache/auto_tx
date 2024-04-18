@@ -231,7 +231,7 @@ impl AutoTx for EthClient {
         match self.send_raw_transaction(raw_transaction).await {
             Ok(hash) => {
                 let hash_to_check = hash.0.to_vec();
-                storage.store_status(init_hash, &Status::Uncheck).await?;
+                storage.update_status(init_hash, &Status::Uncheck).await?;
                 storage
                     .store_hash_to_check(
                         init_hash,

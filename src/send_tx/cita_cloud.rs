@@ -360,7 +360,7 @@ impl AutoTx for CitaCloudClient {
         match send_result {
             Ok(hash) => {
                 let hash_to_check = hash.hash;
-                storage.store_status(init_hash, &Status::Uncheck).await?;
+                storage.update_status(init_hash, &Status::Uncheck).await?;
                 storage
                     .store_hash_to_check(
                         init_hash,

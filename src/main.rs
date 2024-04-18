@@ -46,6 +46,7 @@ use common_rs::{
     restful::http_serve,
 };
 use config::{CitaCreateConfig, Config};
+use once_cell::sync::OnceCell;
 use salvo::prelude::*;
 use send_tx::handle_send_tx;
 use serde::{Deserialize, Serialize};
@@ -79,6 +80,12 @@ pub fn clap_about() -> String {
 struct Opts {
     #[clap(subcommand)]
     subcmd: SubCommand,
+}
+
+pub static HLC: OnceCell<uhlc::HLC> = OnceCell::new();
+
+pub fn hlc() -> &'static uhlc::HLC {
+    HLC.get_or_init(uhlc::HLC::default)
 }
 
 fn main() {
@@ -130,10 +137,8 @@ async fn run(opts: RunOpts) -> Result<()> {
     // init tracer
     log::init_tracing(&config.name, &config.log_config)?;
 
-    info!("fast_mode: {}", config.fast_mode);
-    info!("process_interval: {}", config.process_interval);
-    info!("max_timeout: {}", config.max_timeout);
-    info!("use kms: {}", config.kms_url);
+    info!("hlc id: {}", hlc().get_id());
+    info!("config: {:?}", config);
 
     if let Some(config) = config.cita_create_config.as_ref() {
         info!("CitaCreateConfig exist: chain_name: {}", config.chain_name);
@@ -146,7 +151,6 @@ async fn run(opts: RunOpts) -> Result<()> {
     let Config {
         name,
         port,
-        process_interval,
         check_error_interval,
         check_workers_num,
         send_workers_num,
@@ -168,6 +172,8 @@ async fn run(opts: RunOpts) -> Result<()> {
         .push(Router::with_path("/api/<chain_name>/send_tx").post(handle_send_tx))
         .push(Router::with_path("/api/<chain_name>/receipt/<hash>").get(get_receipt_handler))
         .push(Router::with_path("/api/task/<hash>").get(get_task_handler));
+
+    info!("router: {:?}", router);
 
     let (send_task_tx, send_task_rx) = flume::unbounded::<String>();
     let (check_task_tx, check_task_rx) = flume::unbounded::<String>();
@@ -223,26 +229,46 @@ async fn run(opts: RunOpts) -> Result<()> {
 
     // read and distribute tasks proactively
     tokio::spawn(async move {
-        let mut process_interval =
-            tokio::time::interval(tokio::time::Duration::from_secs(process_interval));
         let mut conn = state.storage.operator();
+
         loop {
-            process_interval.tick().await;
-            if let Ok(mut iter) = conn
-                .scan_match::<String, String>(format!("{}/task/status/*", name))
-                .await
-            {
-                while let Some(key_str) = iter.next_item().await {
-                    if let Some(init_hash) = key_str.split('/').last() {
-                        if let Ok(status) = state.storage.load_status(init_hash).await {
-                            match status {
-                                Status::Unsend => {
-                                    send_task_tx.send_async(init_hash.to_string()).await.ok();
+            if send_task_rx.is_empty() || check_task_rx.is_empty() {
+                let mut tasks_num = 0;
+                if let Ok((send_tasks, check_tasks)) = state.storage.read_processing_task().await {
+                    tasks_num = send_tasks.len() + check_tasks.len();
+                    send_tasks.iter().cloned().for_each(|init_hash| {
+                        send_task_tx.send(init_hash).ok();
+                    });
+                    check_tasks.iter().cloned().for_each(|init_hash| {
+                        check_task_tx.send(init_hash).ok();
+                    });
+                }
+
+                // prevention of lost msg
+                if tasks_num == 0 && send_task_rx.is_empty() && check_task_rx.is_empty() {
+                    if let Ok(mut iter) = conn
+                        .scan_match::<String, String>(format!("{}/task/status/*", name))
+                        .await
+                    {
+                        while let Some(key_str) = iter.next_item().await {
+                            if let Some(init_hash) = key_str.split('/').last() {
+                                if let Ok(status) = state.storage.load_status(init_hash).await {
+                                    match status {
+                                        Status::Unsend => {
+                                            send_task_tx
+                                                .send_async(init_hash.to_string())
+                                                .await
+                                                .ok();
+                                        }
+                                        Status::Uncheck => {
+                                            check_task_tx
+                                                .send_async(init_hash.to_string())
+                                                .await
+                                                .ok();
+                                        }
+                                        _ => {}
+                                    }
                                 }
-                                Status::Uncheck => {
-                                    check_task_tx.send_async(init_hash.to_string()).await.ok();
-                                }
-                                _ => {}
                             }
                         }
                     }

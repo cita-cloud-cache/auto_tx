@@ -542,7 +542,7 @@ impl AutoTx for CitaClient {
         let send_result = self.send_signed_transaction(&signed_tx);
         match send_result {
             Ok(hash_to_check) => {
-                storage.store_status(init_hash, &Status::Uncheck).await?;
+                storage.update_status(init_hash, &Status::Uncheck).await?;
                 storage
                     .store_hash_to_check(
                         init_hash,
