@@ -52,8 +52,6 @@ pub struct Config {
 
     pub log_config: LogConfig,
 
-    pub process_interval: u64,
-
     pub read_processing_num: usize,
 
     pub task_retry_interval: u64,
@@ -62,8 +60,6 @@ pub struct Config {
 
     pub send_workers_num: u64,
 
-    pub fast_mode: bool,
-
     pub max_timeout: u32,
 
     pub chain_config_ttl: u64,
@@ -71,8 +67,6 @@ pub struct Config {
     pub request_key_ttl: u64,
 
     pub rpc_timeout: u64,
-
-    pub try_lock_timeout: u64,
 
     pub redis_config: RedisConfig,
 
@@ -89,18 +83,15 @@ impl Default for Config {
             kms_url: Default::default(),
             log_config: Default::default(),
             max_timeout: 600,
-            process_interval: 5,
             read_processing_num: 10,
             task_retry_interval: 1,
             check_workers_num: 5,
             send_workers_num: 10,
             chain_config_ttl: 3,
             rpc_timeout: 1000,
-            try_lock_timeout: 200,
             cita_create_config: None,
             redis_config: Default::default(),
             service_register_config: Default::default(),
-            fast_mode: false,
             request_key_ttl: 600,
         }
     }

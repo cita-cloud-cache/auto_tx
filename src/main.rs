@@ -138,7 +138,7 @@ async fn run(opts: RunOpts) -> Result<()> {
     log::init_tracing(&config.name, &config.log_config)?;
 
     info!("hlc id: {}", hlc().get_id());
-    info!("config: {:?}", config);
+    info!("config: {:#?}", config);
 
     if let Some(config) = config.cita_create_config.as_ref() {
         info!("CitaCreateConfig exist: chain_name: {}", config.chain_name);
