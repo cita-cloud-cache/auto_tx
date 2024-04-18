@@ -75,12 +75,8 @@ impl Storage {
         self.store_status(init_hash, status).await?;
         let mut conn = self.operator();
         let key = format!("{}/processing/{:?}/", get_config().name, status);
-        conn.xadd::<&str, &str, &str, &str, ()>(
-            &key,
-            &format!("{}", hlc().new_timestamp()),
-            &[(init_hash, "")],
-        )
-        .await?;
+        conn.xadd::<&str, &str, &str, &str, ()>(&key, "*", &[(init_hash, "")])
+            .await?;
 
         Ok(())
     }
