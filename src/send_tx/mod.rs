@@ -44,7 +44,7 @@ pub trait AutoTx {
         init_hash: &str,
         check_task: &CheckTask,
         storage: &Storage,
-    ) -> Result<TaskResult>;
+    ) -> Result<()>;
 
     async fn get_receipt(&mut self, hash: &str) -> Result<TaskResult>;
 }
@@ -92,7 +92,7 @@ impl AutoTx for ChainClient {
         init_hash: &str,
         check_task: &CheckTask,
         storage: &Storage,
-    ) -> Result<TaskResult> {
+    ) -> Result<()> {
         match self {
             ChainClient::CitaCloud(client) => {
                 client

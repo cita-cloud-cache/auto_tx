@@ -589,6 +589,7 @@ impl AutoTx for CitaClient {
                                 init_hash,
                                 timeout.get_cita_timeout().remain_time
                             );
+                            return Ok(init_hash.to_string());
                         }
                     }
                 }
@@ -603,7 +604,7 @@ impl AutoTx for CitaClient {
         init_hash: &str,
         check_task: &CheckTask,
         storage: &Storage,
-    ) -> Result<TaskResult> {
+    ) -> Result<()> {
         let hash = &check_task.hash_to_check.hash;
         let hash_str = hash.encode_hex::<String>();
         match self.get_transaction_receipt(&add_0x(hash_str.clone())) {
@@ -620,7 +621,7 @@ impl AutoTx for CitaClient {
                             init_hash, hash_str
                         );
 
-                        Ok(auto_tx_result)
+                        Ok(())
                     }
                     Some(error) => {
                         match error.as_str() {
@@ -632,9 +633,10 @@ impl AutoTx for CitaClient {
                                         storage.store_gas(init_hash, &gas).await?;
                                         storage.downgrade_to_unsend(init_hash).await?;
                                         warn!(
-                                        "uncheck task: {} check failed: out of gas, hash: {}, self_update and resend, gas: {}",
-                                        init_hash, hash_str, gas.gas
-                                    );
+                                            "uncheck task: {} check failed: out of gas, hash: {}, self_update and resend, gas: {}",
+                                            init_hash, hash_str, gas.gas
+                                        );
+                                        return Ok(());
                                     }
                                     Err(e) => {
                                         if e.to_string().as_str() == "reach quota_limit" {
@@ -647,6 +649,7 @@ impl AutoTx for CitaClient {
                                                 "uncheck task: {} failed: reach quota_limit",
                                                 init_hash,
                                             );
+                                            return Ok(());
                                         }
                                     }
                                 }
@@ -663,7 +666,7 @@ impl AutoTx for CitaClient {
                                     init_hash, e, hash_str,
                                 );
 
-                                Err(eyre!(error))
+                                Ok(())
                             }
                         }
                     }
@@ -688,6 +691,7 @@ impl AutoTx for CitaClient {
                                 init_hash,
                                 timeout.get_cita_timeout().remain_time
                             );
+                            return Ok(());
                         }
                     }
                     Err(e) => {
@@ -699,6 +703,7 @@ impl AutoTx for CitaClient {
                                 init_hash,
                                 timeout.get_cita_timeout().remain_time
                             );
+                            return Ok(());
                         }
                     }
                 }

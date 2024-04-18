@@ -151,7 +151,7 @@ async fn run(opts: RunOpts) -> Result<()> {
     let Config {
         name,
         port,
-        check_error_interval,
+        task_retry_interval,
         check_workers_num,
         send_workers_num,
         ..
@@ -183,20 +183,20 @@ async fn run(opts: RunOpts) -> Result<()> {
         let state = state.clone();
         let check_task_rx = check_task_rx.clone();
         tokio::spawn(async move {
-            let mut check_error_interval =
-                tokio::time::interval(tokio::time::Duration::from_secs(check_error_interval));
+            let mut task_retry_interval =
+                tokio::time::interval(tokio::time::Duration::from_secs(task_retry_interval));
             while let Ok(init_hash) = check_task_rx.recv_async().await {
                 debug!("checking task: {}", &init_hash);
                 if let Ok(check_task) = state.storage.load_check_task(&init_hash).await {
                     let chain_name = check_task.base_data.chain_name.as_ref();
                     if let Ok(mut chain) = state.chains.get_chain(chain_name).await {
-                        if chain
+                        while let Err(e) = chain
                             .chain_client
                             .process_check_task(&init_hash, &check_task, &state.storage)
                             .await
-                            .is_err()
                         {
-                            check_error_interval.tick().await;
+                            info!("check retry: {init_hash} failed: {e}");
+                            task_retry_interval.tick().await;
                         }
                     }
                 }
@@ -209,16 +209,21 @@ async fn run(opts: RunOpts) -> Result<()> {
         let state = state.clone();
         let send_task_rx = send_task_rx.clone();
         tokio::spawn(async move {
+            let mut task_retry_interval =
+                tokio::time::interval(tokio::time::Duration::from_secs(task_retry_interval));
             while let Ok(init_hash) = send_task_rx.recv_async().await {
                 if let Ok(send_task) = state.storage.load_send_task(&init_hash).await {
                     if state.storage.try_lock_task(&init_hash).await.is_ok() {
                         let chain_name = send_task.base_data.chain_name.as_ref();
                         if let Ok(mut chain) = state.chains.get_chain(chain_name).await {
-                            chain
+                            while let Err(e) = chain
                                 .chain_client
                                 .process_send_task(&init_hash, &send_task, &state.storage)
                                 .await
-                                .ok();
+                            {
+                                info!("send retry: {init_hash} failed: {e}");
+                                task_retry_interval.tick().await;
+                            }
                         }
                         state.storage.unlock_task(&init_hash).await.ok();
                     }

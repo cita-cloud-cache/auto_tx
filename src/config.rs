@@ -56,7 +56,7 @@ pub struct Config {
 
     pub read_processing_num: usize,
 
-    pub check_error_interval: u64,
+    pub task_retry_interval: u64,
 
     pub check_workers_num: u64,
 
@@ -91,7 +91,7 @@ impl Default for Config {
             max_timeout: 600,
             process_interval: 5,
             read_processing_num: 10,
-            check_error_interval: 1,
+            task_retry_interval: 1,
             check_workers_num: 5,
             send_workers_num: 10,
             chain_config_ttl: 3,

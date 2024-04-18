@@ -274,7 +274,7 @@ impl AutoTx for EthClient {
         init_hash: &str,
         check_task: &CheckTask,
         storage: &Storage,
-    ) -> Result<TaskResult> {
+    ) -> Result<()> {
         let hash = &check_task.hash_to_check.hash;
         let hash_str = hash.encode_hex::<String>();
         match self.transaction_receipt(H256::from_slice(hash)).await {
@@ -294,7 +294,7 @@ impl AutoTx for EthClient {
                                 init_hash, hash_str
                             );
 
-                            Ok(auto_tx_result)
+                            Ok(())
                         }
                         (Some(status), Some(used))
                             if status == U64::from(0) && used.as_u64() == gas.gas =>
@@ -305,9 +305,11 @@ impl AutoTx for EthClient {
                                     storage.store_gas(init_hash, &gas).await?;
                                     storage.downgrade_to_unsend(init_hash).await?;
                                     warn!(
-                                    "uncheck task: {} check failed: out of gas, hash: {}, self_update and resend, gas: {}",
-                                    init_hash, hash_str, gas.gas
-                                );
+                                        "uncheck task: {} check failed: out of gas, hash: {}, self_update and resend, gas: {}",
+                                        init_hash, hash_str, gas.gas
+                                    );
+
+                                    return Ok(());
                                 }
                                 Err(e) => {
                                     if e.to_string().as_str() == "reach quota_limit" {
@@ -318,6 +320,7 @@ impl AutoTx for EthClient {
                                             "uncheck task: {} failed: reach quota_limit",
                                             init_hash,
                                         );
+                                        return Ok(());
                                     }
                                 }
                             }
@@ -335,7 +338,7 @@ impl AutoTx for EthClient {
                                 init_hash, err_info, hash_str,
                             );
 
-                            Err(eyre!(err_info.to_owned()))
+                            Ok(())
                         }
                     }
                 }

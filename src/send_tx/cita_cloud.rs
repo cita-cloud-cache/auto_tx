@@ -408,6 +408,7 @@ impl AutoTx for CitaCloudClient {
                                 init_hash,
                                 timeout.get_cita_timeout().remain_time
                             );
+                            return Ok(init_hash.to_string());
                         }
                     }
                 }
@@ -422,7 +423,7 @@ impl AutoTx for CitaCloudClient {
         init_hash: &str,
         check_task: &CheckTask,
         storage: &Storage,
-    ) -> Result<TaskResult> {
+    ) -> Result<()> {
         debug!("process_check_task: {:?}", check_task);
         let hash = check_task.hash_to_check.hash.clone();
         let hash_str = hash.encode_hex::<String>();
@@ -447,7 +448,7 @@ impl AutoTx for CitaCloudClient {
                         init_hash, hash_str
                     );
 
-                    Ok(auto_tx_result)
+                    Ok(())
                 }
                 "Out of quota." => {
                     // self_update and resend
@@ -460,6 +461,7 @@ impl AutoTx for CitaCloudClient {
                                 "uncheck task: {} check failed: out of gas, hash: {}, self_update and resend, gas: {}",
                                 init_hash, hash_str, gas.gas
                             );
+                            Ok(())
                         }
                         Err(e) => {
                             if e.to_string().as_str() == "reach quota_limit" {
@@ -467,11 +469,12 @@ impl AutoTx for CitaCloudClient {
                                     TaskResult::failed(Some(hash_str), e.to_string());
                                 storage.finalize_task(init_hash, &auto_tx_result).await?;
                                 warn!("uncheck task: {} failed: reach quota_limit", init_hash,);
+                                Ok(())
+                            } else {
+                                Err(eyre!(receipt.error_message))
                             }
                         }
                     }
-
-                    Err(eyre!(receipt.error_message))
                 }
                 e => {
                     // record fail
@@ -482,7 +485,7 @@ impl AutoTx for CitaCloudClient {
                         init_hash, e, hash_str,
                     );
 
-                    Err(eyre!(e.to_owned()))
+                    Ok(())
                 }
             },
             Ok(Err(e)) => {
@@ -506,6 +509,7 @@ impl AutoTx for CitaCloudClient {
                                 init_hash,
                                 timeout.get_cita_timeout().remain_time
                             );
+                            return Ok(());
                         }
                     }
                     Err(e) => {
@@ -517,6 +521,7 @@ impl AutoTx for CitaCloudClient {
                                 init_hash,
                                 timeout.get_cita_timeout().remain_time
                             );
+                            return Ok(());
                         }
                     }
                 }
