@@ -84,6 +84,11 @@ impl Storage {
     pub async fn read_processing_task(&self, status: &Status) -> Result<Vec<String>> {
         let mut conn = self.operator();
         let config = get_config();
+        let read_num = match status {
+            Status::Uncheck => config.read_check_num,
+            Status::Unsend => config.read_send_num,
+            _ => 0,
+        };
 
         let keys = &[&format!("{}/processing/{:?}/", config.name, status)];
 
@@ -93,7 +98,7 @@ impl Storage {
 
         let opts = streams::StreamReadOptions::default()
             .group(config.name.clone(), format!("{}", hlc().get_id()))
-            .count(config.read_processing_num);
+            .count(read_num);
 
         let iter: streams::StreamReadReply = conn.xread_options(keys, &[">", ">"], &opts).await?;
 

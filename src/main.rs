@@ -215,23 +215,26 @@ async fn run(opts: RunOpts) -> Result<()> {
         let old_timestamp = AtomicU64::new(unix_now());
         loop {
             let timestamp = unix_now();
-            tokio::select! {
-                Ok(send_tasks) = state.storage.read_processing_task(&Status::Unsend) => {
-                    if !send_tasks.is_empty() {
-                        old_timestamp.store(timestamp, Ordering::Relaxed);
-                    }
-                    send_tasks.iter().cloned().for_each(|init_hash| {
-                        send_task(init_hash, &state);
-                    });
-                },
-                Ok(check_tasks) = state.storage.read_processing_task(&Status::Uncheck) => {
+
+            if check_task_tx.is_empty() {
+                if let Ok(check_tasks) = state.storage.read_processing_task(&Status::Uncheck).await
+                {
                     if !check_tasks.is_empty() {
                         old_timestamp.store(timestamp, Ordering::Relaxed);
                     }
                     check_tasks.iter().cloned().for_each(|init_hash| {
                         check_task_tx.send(init_hash).ok();
                     });
-                },
+                }
+            }
+
+            if let Ok(send_tasks) = state.storage.read_processing_task(&Status::Unsend).await {
+                if !send_tasks.is_empty() {
+                    old_timestamp.store(timestamp, Ordering::Relaxed);
+                }
+                send_tasks.iter().cloned().for_each(|init_hash| {
+                    send_task(init_hash, &state);
+                });
             }
 
             // prevention of lost msg

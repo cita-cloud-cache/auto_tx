@@ -52,7 +52,9 @@ pub struct Config {
 
     pub log_config: LogConfig,
 
-    pub read_processing_num: usize,
+    pub read_send_num: usize,
+
+    pub read_check_num: usize,
 
     pub task_retry_interval: u64,
 
@@ -83,7 +85,8 @@ impl Default for Config {
             kms_url: Default::default(),
             log_config: Default::default(),
             max_timeout: 600,
-            read_processing_num: 10,
+            read_send_num: 100,
+            read_check_num: 10,
             task_retry_interval: 1,
             recycle_task_interval: 60,
             check_workers_num: 5,
