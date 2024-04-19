@@ -174,8 +174,8 @@ async fn run(opts: RunOpts) -> Result<()> {
         port,
         task_retry_interval,
         recycle_task_interval,
+        recycle_task_num,
         check_workers_num,
-        read_check_num,
         ..
     } = config.clone();
 
@@ -246,7 +246,7 @@ async fn run(opts: RunOpts) -> Result<()> {
                     .scan_match::<String, String>(format!("{}/task/status/*", name))
                     .await
                 {
-                    for _ in 0..read_check_num {
+                    for _ in 0..recycle_task_num {
                         if let Some(key_str) = iter.next_item().await {
                             if let Some(init_hash) = key_str.split('/').last() {
                                 if let Ok(status) = state.storage.load_status(init_hash).await {
