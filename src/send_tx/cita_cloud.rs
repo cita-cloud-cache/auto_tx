@@ -385,6 +385,9 @@ impl AutoTx for CitaCloudClient {
                     e.to_string(),
                     timeout.get_cita_timeout().remain_time
                 );
+                if e.to_string().contains("DupTransaction") {
+                    return Ok(init_hash.to_string());
+                }
                 match self.try_update_timeout(timeout, storage).await {
                     Ok(new_timeout) => {
                         debug!("{init_hash} new_timeout: {new_timeout} ");

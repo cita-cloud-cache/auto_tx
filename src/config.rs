@@ -88,7 +88,7 @@ impl Default for Config {
             read_send_num: 100,
             read_check_num: 10,
             task_retry_interval: 1,
-            recycle_task_interval: 60,
+            recycle_task_interval: 120,
             check_workers_num: 5,
             chain_config_ttl: 3,
             rpc_timeout: 1000,

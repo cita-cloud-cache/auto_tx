@@ -175,6 +175,7 @@ async fn run(opts: RunOpts) -> Result<()> {
         task_retry_interval,
         recycle_task_interval,
         check_workers_num,
+        read_check_num,
         ..
     } = config.clone();
 
@@ -239,24 +240,27 @@ async fn run(opts: RunOpts) -> Result<()> {
 
             // prevention of lost msg
             let old_timestamp_ = old_timestamp.load(Ordering::Relaxed);
-            if timestamp - old_timestamp_ > recycle_task_interval * 1000 {
+            if check_task_tx.is_empty() && timestamp - old_timestamp_ > recycle_task_interval * 1000
+            {
                 if let Ok(mut iter) = conn
                     .scan_match::<String, String>(format!("{}/task/status/*", name))
                     .await
                 {
-                    while let Some(key_str) = iter.next_item().await {
-                        if let Some(init_hash) = key_str.split('/').last() {
-                            if let Ok(status) = state.storage.load_status(init_hash).await {
-                                match status {
-                                    Status::Unsend => {
-                                        info!("recycle unsend task: {}", init_hash);
-                                        send_task(init_hash.to_owned(), &state);
+                    for _ in 0..read_check_num {
+                        if let Some(key_str) = iter.next_item().await {
+                            if let Some(init_hash) = key_str.split('/').last() {
+                                if let Ok(status) = state.storage.load_status(init_hash).await {
+                                    match status {
+                                        Status::Unsend => {
+                                            info!("recycle unsend task: {}", init_hash);
+                                            send_task(init_hash.to_owned(), &state);
+                                        }
+                                        Status::Uncheck => {
+                                            info!("recycle uncheck task: {}", init_hash);
+                                            check_task_tx.send(init_hash.to_string()).ok();
+                                        }
+                                        _ => {}
                                     }
-                                    Status::Uncheck => {
-                                        info!("recycle uncheck task: {}", init_hash);
-                                        check_task_tx.send(init_hash.to_string()).ok();
-                                    }
-                                    _ => {}
                                 }
                             }
                         }
