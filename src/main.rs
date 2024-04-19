@@ -170,6 +170,7 @@ async fn run(opts: RunOpts) -> Result<()> {
         name,
         port,
         task_retry_interval,
+        recycle_task_interval,
         check_workers_num,
         ..
     } = config.clone();
@@ -231,7 +232,7 @@ async fn run(opts: RunOpts) -> Result<()> {
             }
 
             // prevention of lost msg
-            if timestamp - old_timestamp > 60 * 1000 {
+            if timestamp - old_timestamp > recycle_task_interval * 1000 {
                 if let Ok(mut iter) = conn
                     .scan_match::<String, String>(format!("{}/task/status/*", name))
                     .await

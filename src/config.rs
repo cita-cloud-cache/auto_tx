@@ -56,6 +56,8 @@ pub struct Config {
 
     pub task_retry_interval: u64,
 
+    pub recycle_task_interval: u64,
+
     pub check_workers_num: u64,
 
     pub max_timeout: u32,
@@ -83,6 +85,7 @@ impl Default for Config {
             max_timeout: 600,
             read_processing_num: 10,
             task_retry_interval: 1,
+            recycle_task_interval: 60,
             check_workers_num: 5,
             chain_config_ttl: 3,
             rpc_timeout: 1000,
