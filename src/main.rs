@@ -51,7 +51,10 @@ use once_cell::sync::OnceCell;
 use salvo::prelude::*;
 use send_tx::handle_send_tx;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
 use storage::Storage;
 
 /// A subcommand for run
@@ -209,13 +212,13 @@ async fn run(opts: RunOpts) -> Result<()> {
     // read and distribute tasks proactively
     tokio::spawn(async move {
         let mut conn = state.storage.operator();
-        let mut old_timestamp = unix_now();
+        let old_timestamp = AtomicU64::new(unix_now());
         loop {
             let timestamp = unix_now();
             tokio::select! {
                 Ok(send_tasks) = state.storage.read_processing_task(&Status::Unsend) => {
                     if !send_tasks.is_empty() {
-                        old_timestamp = timestamp;
+                        old_timestamp.store(timestamp, Ordering::Relaxed);
                     }
                     send_tasks.iter().cloned().for_each(|init_hash| {
                         send_task(init_hash, &state);
@@ -223,7 +226,7 @@ async fn run(opts: RunOpts) -> Result<()> {
                 },
                 Ok(check_tasks) = state.storage.read_processing_task(&Status::Uncheck) => {
                     if !check_tasks.is_empty() {
-                        old_timestamp = timestamp;
+                        old_timestamp.store(timestamp, Ordering::Relaxed);
                     }
                     check_tasks.iter().cloned().for_each(|init_hash| {
                         check_task_tx.send(init_hash).ok();
@@ -232,6 +235,7 @@ async fn run(opts: RunOpts) -> Result<()> {
             }
 
             // prevention of lost msg
+            let old_timestamp = old_timestamp.load(Ordering::Relaxed);
             if timestamp - old_timestamp > recycle_task_interval * 1000 {
                 if let Ok(mut iter) = conn
                     .scan_match::<String, String>(format!("{}/task/status/*", name))
