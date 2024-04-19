@@ -101,10 +101,8 @@ impl Storage {
             .group(config.name.clone(), format!("{}", hlc().get_id()))
             .count(read_num);
 
-        let iter: streams::StreamReadReply = conn
-            .xread_options(keys, &[">", ">"], &opts)
-            .await
-            .map_err(|e| {
+        let iter: streams::StreamReadReply =
+            conn.xread_options(keys, &[">"], &opts).await.map_err(|e| {
                 debug!("xread error: {}", e);
                 e
             })?;
