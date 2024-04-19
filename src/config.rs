@@ -58,8 +58,6 @@ pub struct Config {
 
     pub check_workers_num: u64,
 
-    pub send_workers_num: u64,
-
     pub max_timeout: u32,
 
     pub chain_config_ttl: u64,
@@ -86,7 +84,6 @@ impl Default for Config {
             read_processing_num: 10,
             task_retry_interval: 1,
             check_workers_num: 5,
-            send_workers_num: 10,
             chain_config_ttl: 3,
             rpc_timeout: 1000,
             cita_create_config: None,

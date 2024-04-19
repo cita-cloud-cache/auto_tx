@@ -81,16 +81,15 @@ impl Storage {
         Ok(())
     }
 
-    pub async fn read_processing_task(&self) -> Result<(Vec<String>, Vec<String>)> {
+    pub async fn read_processing_task(&self, status: &Status) -> Result<Vec<String>> {
         let mut conn = self.operator();
         let config = get_config();
 
-        let keys = &[
-            &format!("{}/processing/{:?}/", config.name, Status::Unsend),
-            &format!("{}/processing/{:?}/", config.name, Status::Uncheck),
-        ];
+        let keys = &[&format!("{}/processing/{:?}/", config.name, status)];
 
-        let _: Result<(), _> = conn.xgroup_create_mkstream(keys, &config.name, "$").await;
+        let _: Result<(), _> = conn
+            .xgroup_create_mkstream(keys[0], &config.name, "0")
+            .await;
 
         let opts = streams::StreamReadOptions::default()
             .group(config.name.clone(), format!("{}", hlc().get_id()))
@@ -98,20 +97,20 @@ impl Storage {
 
         let iter: streams::StreamReadReply = conn.xread_options(keys, &[">", ">"], &opts).await?;
 
-        let mut send_tasks = vec![];
-        let mut check_tasks = vec![];
+        let mut tasks = vec![];
 
         for key in iter.keys {
             if &key.key == keys[0] {
-                send_tasks.extend(key.ids.iter().flat_map(|id| id.map.keys().cloned()));
+                tasks.extend(key.ids.iter().flat_map(|id| {
+                    id.map
+                        .keys()
+                        .filter_map(|k| k.split('/').map(|k| k.to_string()).last())
+                }));
                 continue;
-            }
-            if &key.key == keys[1] {
-                check_tasks.extend(key.ids.iter().flat_map(|id| id.map.keys().cloned()));
             }
         }
 
-        Ok((send_tasks, check_tasks))
+        Ok(tasks)
     }
 
     pub async fn store_send_task(&self, init_hash: &str, task: &SendTask) -> Result<()> {

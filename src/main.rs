@@ -35,6 +35,7 @@ mod util;
 use crate::{
     config::set_config, get_receipt::get_receipt as get_receipt_handler,
     get_task::get_task as get_task_handler, kms::set_kms, send_tx::AutoTx, task::Status,
+    util::unix_now,
 };
 use chains::Chains;
 use clap::Parser;
@@ -126,6 +127,23 @@ impl AutoTxGlobalState {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Default, Deserialize)]
+#[serde(default)]
+pub struct RequestParams {
+    #[serde(skip_serializing_if = "String::is_empty")]
+    to: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    data: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    value: String,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    timeout: Option<u32>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    gas: Option<u64>,
+}
+
 #[tokio::main]
 async fn run(opts: RunOpts) -> Result<()> {
     ::std::env::set_var("RUST_BACKTRACE", "full");
@@ -153,7 +171,6 @@ async fn run(opts: RunOpts) -> Result<()> {
         port,
         task_retry_interval,
         check_workers_num,
-        send_workers_num,
         ..
     } = config.clone();
 
@@ -175,7 +192,6 @@ async fn run(opts: RunOpts) -> Result<()> {
 
     info!("router: {:?}", router);
 
-    let (send_task_tx, send_task_rx) = flume::unbounded::<String>();
     let (check_task_tx, check_task_rx) = flume::unbounded::<String>();
 
     // spawn check task workers
@@ -183,51 +199,8 @@ async fn run(opts: RunOpts) -> Result<()> {
         let state = state.clone();
         let check_task_rx = check_task_rx.clone();
         tokio::spawn(async move {
-            let mut task_retry_interval =
-                tokio::time::interval(tokio::time::Duration::from_secs(task_retry_interval));
             while let Ok(init_hash) = check_task_rx.recv_async().await {
-                debug!("checking task: {}", &init_hash);
-                if let Ok(check_task) = state.storage.load_check_task(&init_hash).await {
-                    let chain_name = check_task.base_data.chain_name.as_ref();
-                    if let Ok(mut chain) = state.chains.get_chain(chain_name).await {
-                        while let Err(e) = chain
-                            .chain_client
-                            .process_check_task(&init_hash, &check_task, &state.storage)
-                            .await
-                        {
-                            info!("check retry: {init_hash} failed: {e}");
-                            task_retry_interval.tick().await;
-                        }
-                    }
-                }
-            }
-        });
-    }
-
-    // spawn send task workers
-    for _ in 0..send_workers_num {
-        let state = state.clone();
-        let send_task_rx = send_task_rx.clone();
-        tokio::spawn(async move {
-            let mut task_retry_interval =
-                tokio::time::interval(tokio::time::Duration::from_secs(task_retry_interval));
-            while let Ok(init_hash) = send_task_rx.recv_async().await {
-                if let Ok(send_task) = state.storage.load_send_task(&init_hash).await {
-                    if state.storage.try_lock_task(&init_hash).await.is_ok() {
-                        let chain_name = send_task.base_data.chain_name.as_ref();
-                        if let Ok(mut chain) = state.chains.get_chain(chain_name).await {
-                            while let Err(e) = chain
-                                .chain_client
-                                .process_send_task(&init_hash, &send_task, &state.storage)
-                                .await
-                            {
-                                info!("send retry: {init_hash} failed: {e}");
-                                task_retry_interval.tick().await;
-                            }
-                        }
-                        state.storage.unlock_task(&init_hash).await.ok();
-                    }
-                }
+                check_task(init_hash, &state, task_retry_interval).await;
             }
         });
     }
@@ -235,44 +208,47 @@ async fn run(opts: RunOpts) -> Result<()> {
     // read and distribute tasks proactively
     tokio::spawn(async move {
         let mut conn = state.storage.operator();
-
+        let mut old_timestamp = unix_now();
         loop {
-            if send_task_rx.is_empty() || check_task_rx.is_empty() {
-                let mut tasks_num = 0;
-                if let Ok((send_tasks, check_tasks)) = state.storage.read_processing_task().await {
-                    tasks_num = send_tasks.len() + check_tasks.len();
+            let timestamp = unix_now();
+            tokio::select! {
+                Ok(send_tasks) = state.storage.read_processing_task(&Status::Unsend) => {
+                    if !send_tasks.is_empty() {
+                        old_timestamp = timestamp;
+                    }
                     send_tasks.iter().cloned().for_each(|init_hash| {
-                        send_task_tx.send(init_hash).ok();
+                        send_task(init_hash, &state);
                     });
+                },
+                Ok(check_tasks) = state.storage.read_processing_task(&Status::Uncheck) => {
+                    if !check_tasks.is_empty() {
+                        old_timestamp = timestamp;
+                    }
                     check_tasks.iter().cloned().for_each(|init_hash| {
                         check_task_tx.send(init_hash).ok();
                     });
-                }
+                },
+            }
 
-                // prevention of lost msg
-                if tasks_num == 0 && send_task_rx.is_empty() && check_task_rx.is_empty() {
-                    if let Ok(mut iter) = conn
-                        .scan_match::<String, String>(format!("{}/task/status/*", name))
-                        .await
-                    {
-                        while let Some(key_str) = iter.next_item().await {
-                            if let Some(init_hash) = key_str.split('/').last() {
-                                if let Ok(status) = state.storage.load_status(init_hash).await {
-                                    match status {
-                                        Status::Unsend => {
-                                            send_task_tx
-                                                .send_async(init_hash.to_string())
-                                                .await
-                                                .ok();
-                                        }
-                                        Status::Uncheck => {
-                                            check_task_tx
-                                                .send_async(init_hash.to_string())
-                                                .await
-                                                .ok();
-                                        }
-                                        _ => {}
+            // prevention of lost msg
+            if timestamp - old_timestamp > 60 * 1000 {
+                if let Ok(mut iter) = conn
+                    .scan_match::<String, String>(format!("{}/task/status/*", name))
+                    .await
+                {
+                    while let Some(key_str) = iter.next_item().await {
+                        if let Some(init_hash) = key_str.split('/').last() {
+                            if let Ok(status) = state.storage.load_status(init_hash).await {
+                                match status {
+                                    Status::Unsend => {
+                                        info!("recycle unsend task: {}", init_hash);
+                                        send_task(init_hash.to_owned(), &state);
                                     }
+                                    Status::Uncheck => {
+                                        info!("recycle uncheck task: {}", init_hash);
+                                        check_task_tx.send(init_hash.to_string()).ok();
+                                    }
+                                    _ => {}
                                 }
                             }
                         }
@@ -287,19 +263,41 @@ async fn run(opts: RunOpts) -> Result<()> {
     Ok(())
 }
 
-#[derive(Debug, Clone, Serialize, Default, Deserialize)]
-#[serde(default)]
-pub struct RequestParams {
-    #[serde(skip_serializing_if = "String::is_empty")]
-    to: String,
-    #[serde(skip_serializing_if = "String::is_empty")]
-    data: String,
-    #[serde(skip_serializing_if = "String::is_empty")]
-    value: String,
+fn send_task(init_hash: String, state: &AutoTxGlobalState) {
+    let state = state.clone();
+    tokio::spawn(async move {
+        if let Ok(send_task) = state.storage.load_send_task(&init_hash).await {
+            if state.storage.try_lock_task(&init_hash).await.is_ok() {
+                let chain_name = send_task.base_data.chain_name.as_ref();
+                if let Ok(mut chain) = state.chains.get_chain(chain_name).await {
+                    while let Err(e) = chain
+                        .chain_client
+                        .process_send_task(&init_hash, &send_task, &state.storage)
+                        .await
+                    {
+                        info!("send retry: {init_hash} failed: {e}");
+                    }
+                }
+                state.storage.unlock_task(&init_hash).await.ok();
+            }
+        }
+    });
+}
 
-    #[serde(skip_serializing_if = "Option::is_none")]
-    timeout: Option<u32>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    gas: Option<u64>,
+async fn check_task(init_hash: String, state: &AutoTxGlobalState, task_retry_interval: u64) {
+    if let Ok(check_task) = state.storage.load_check_task(&init_hash).await {
+        let chain_name = check_task.base_data.chain_name.as_ref();
+        if let Ok(mut chain) = state.chains.get_chain(chain_name).await {
+            let mut task_retry_interval =
+                tokio::time::interval(tokio::time::Duration::from_secs(task_retry_interval));
+            while let Err(e) = chain
+                .chain_client
+                .process_check_task(&init_hash, &check_task, &state.storage)
+                .await
+            {
+                info!("check retry: {init_hash} failed: {e}");
+                task_retry_interval.tick().await;
+            }
+        }
+    }
 }
