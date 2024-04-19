@@ -238,8 +238,8 @@ async fn run(opts: RunOpts) -> Result<()> {
             }
 
             // prevention of lost msg
-            let old_timestamp = old_timestamp.load(Ordering::Relaxed);
-            if timestamp - old_timestamp > recycle_task_interval * 1000 {
+            let old_timestamp_ = old_timestamp.load(Ordering::Relaxed);
+            if timestamp - old_timestamp_ > recycle_task_interval * 1000 {
                 if let Ok(mut iter) = conn
                     .scan_match::<String, String>(format!("{}/task/status/*", name))
                     .await
@@ -262,6 +262,7 @@ async fn run(opts: RunOpts) -> Result<()> {
                         }
                     }
                 }
+                old_timestamp.store(timestamp, Ordering::Relaxed);
             }
         }
     });

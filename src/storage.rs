@@ -92,15 +92,22 @@ impl Storage {
 
         let keys = &[&format!("{}/processing/{:?}/", config.name, status)];
 
-        let _: Result<(), _> = conn
-            .xgroup_create_mkstream(keys[0], &config.name, "0")
-            .await;
+        let _xgroup_create_result: Result<(), _> = conn
+            .xgroup_create_mkstream(keys[0], &config.name, "0-0")
+            .await
+            .map_err(|e| debug!("xgroup create error: {}", e));
 
         let opts = streams::StreamReadOptions::default()
             .group(config.name.clone(), format!("{}", hlc().get_id()))
             .count(read_num);
 
-        let iter: streams::StreamReadReply = conn.xread_options(keys, &[">", ">"], &opts).await?;
+        let iter: streams::StreamReadReply = conn
+            .xread_options(keys, &[">", ">"], &opts)
+            .await
+            .map_err(|e| {
+                debug!("xread error: {}", e);
+                e
+            })?;
 
         let mut tasks = vec![];
 
