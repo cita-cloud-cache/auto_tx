@@ -169,6 +169,7 @@ impl Storage {
         let base_data = self.load_base_data(init_hash).await?;
         let timeout = self.load_timeout(init_hash).await?;
         let gas = self.load_gas(init_hash).await?.gas;
+        let hash_to_check = self.load_hash_to_check(init_hash).await.ok();
         let status = self
             .load_status(init_hash)
             .await
@@ -181,6 +182,7 @@ impl Storage {
             timeout,
             gas,
             result: self.load_task_result(init_hash).await.ok(),
+            hash_to_check,
         };
 
         Ok(task)

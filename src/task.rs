@@ -129,6 +129,7 @@ pub struct RawTransactionBytes {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HashToCheck {
+    #[serde(with = "crate::util::bytes_hex")]
     pub hash: Vec<u8>,
 }
 
@@ -167,6 +168,9 @@ pub struct Task {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<TaskResult>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hash_to_check: Option<HashToCheck>,
 }
 
 #[derive(Debug)]
