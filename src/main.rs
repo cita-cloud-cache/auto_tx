@@ -175,7 +175,6 @@ async fn run(opts: RunOpts) -> Result<()> {
         task_retry_interval,
         recycle_task_interval,
         recycle_task_num,
-        check_workers_num,
         ..
     } = config.clone();
 
@@ -197,19 +196,6 @@ async fn run(opts: RunOpts) -> Result<()> {
 
     info!("router: {:?}", router);
 
-    let (check_task_tx, check_task_rx) = flume::unbounded::<String>();
-
-    // spawn check task workers
-    for _ in 0..check_workers_num {
-        let state = state.clone();
-        let check_task_rx = check_task_rx.clone();
-        tokio::spawn(async move {
-            while let Ok(init_hash) = check_task_rx.recv_async().await {
-                check_task(init_hash, &state, task_retry_interval).await;
-            }
-        });
-    }
-
     // read and distribute tasks proactively
     tokio::spawn(async move {
         let mut conn = state.storage.operator();
@@ -217,16 +203,13 @@ async fn run(opts: RunOpts) -> Result<()> {
         loop {
             let timestamp = unix_now();
 
-            if check_task_tx.is_empty() {
-                if let Ok(check_tasks) = state.storage.read_processing_task(&Status::Uncheck).await
-                {
-                    if !check_tasks.is_empty() {
-                        old_timestamp.store(timestamp, Ordering::Relaxed);
-                    }
-                    check_tasks.iter().cloned().for_each(|init_hash| {
-                        check_task_tx.send(init_hash).ok();
-                    });
+            if let Ok(check_tasks) = state.storage.read_processing_task(&Status::Uncheck).await {
+                if !check_tasks.is_empty() {
+                    old_timestamp.store(timestamp, Ordering::Relaxed);
                 }
+                check_tasks.iter().cloned().for_each(|init_hash| {
+                    check_task(init_hash, &state, task_retry_interval);
+                });
             }
 
             if let Ok(send_tasks) = state.storage.read_processing_task(&Status::Unsend).await {
@@ -240,8 +223,7 @@ async fn run(opts: RunOpts) -> Result<()> {
 
             // prevention of lost msg
             let old_timestamp_ = old_timestamp.load(Ordering::Relaxed);
-            if check_task_tx.is_empty() && timestamp - old_timestamp_ > recycle_task_interval * 1000
-            {
+            if timestamp - old_timestamp_ > recycle_task_interval * 1000 {
                 if let Ok(mut iter) = conn
                     .scan_match::<String, String>(format!("{}/task/status/*", name))
                     .await
@@ -257,7 +239,11 @@ async fn run(opts: RunOpts) -> Result<()> {
                                         }
                                         Status::Uncheck => {
                                             info!("recycle uncheck task: {}", init_hash);
-                                            check_task_tx.send(init_hash.to_string()).ok();
+                                            check_task(
+                                                init_hash.to_owned(),
+                                                &state,
+                                                task_retry_interval,
+                                            );
                                         }
                                         _ => {}
                                     }
@@ -297,20 +283,23 @@ fn send_task(init_hash: String, state: &AutoTxGlobalState) {
     });
 }
 
-async fn check_task(init_hash: String, state: &AutoTxGlobalState, task_retry_interval: u64) {
-    if let Ok(check_task) = state.storage.load_check_task(&init_hash).await {
-        let chain_name = check_task.base_data.chain_name.as_ref();
-        if let Ok(mut chain) = state.chains.get_chain(chain_name).await {
-            let mut task_retry_interval =
-                tokio::time::interval(tokio::time::Duration::from_secs(task_retry_interval));
-            while let Err(e) = chain
-                .chain_client
-                .process_check_task(&init_hash, &check_task, &state.storage)
-                .await
-            {
-                info!("check retry: {init_hash} failed: {e}");
-                task_retry_interval.tick().await;
+fn check_task(init_hash: String, state: &AutoTxGlobalState, task_retry_interval: u64) {
+    let state = state.clone();
+    tokio::spawn(async move {
+        if let Ok(check_task) = state.storage.load_check_task(&init_hash).await {
+            let chain_name = check_task.base_data.chain_name.as_ref();
+            if let Ok(mut chain) = state.chains.get_chain(chain_name).await {
+                let mut task_retry_interval =
+                    tokio::time::interval(tokio::time::Duration::from_secs(task_retry_interval));
+                while let Err(e) = chain
+                    .chain_client
+                    .process_check_task(&init_hash, &check_task, &state.storage)
+                    .await
+                {
+                    info!("check retry: {init_hash} failed: {e}");
+                    task_retry_interval.tick().await;
+                }
             }
         }
-    }
+    });
 }
