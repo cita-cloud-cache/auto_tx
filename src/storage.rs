@@ -1,4 +1,4 @@
-use crate::{config::get_config, hlc, task::*};
+use crate::{config::get_config, instance_name, task::*};
 use color_eyre::eyre::{eyre, Result};
 use common_rs::redis::{
     streams, AsyncCommands, ExistenceCheck, Redis, RedisConnection, SetExpiry, SetOptions,
@@ -81,7 +81,7 @@ impl Storage {
         Ok(())
     }
 
-    pub async fn read_processing_task(&self, status: &Status) -> Result<Vec<String>> {
+    pub async fn read_processing_task(&self, status: &Status) -> Result<Vec<(String, String)>> {
         let mut conn = self.operator();
         let config = get_config();
         let read_num = match status {
@@ -98,7 +98,7 @@ impl Storage {
             .map_err(|e| debug!("xgroup create error: {}", e));
 
         let opts = streams::StreamReadOptions::default()
-            .group(config.name.clone(), format!("{}", hlc().get_id()))
+            .group(config.name.clone(), instance_name())
             .count(read_num);
 
         let iter: streams::StreamReadReply =
@@ -107,18 +107,66 @@ impl Storage {
                 e
             })?;
 
-        let mut tasks = vec![];
-
-        for key in iter.keys {
-            if &key.key == keys[0] {
-                tasks.extend(key.ids.iter().flat_map(|id| {
+        let tasks = iter
+            .keys
+            .iter()
+            .flat_map(|key| {
+                key.ids.iter().filter_map(|id| {
                     id.map
                         .keys()
-                        .filter_map(|k| k.split('/').map(|k| k.to_string()).last())
-                }));
-                continue;
-            }
-        }
+                        .next()?
+                        .rsplit('/')
+                        .last()
+                        .map(|k| (id.id.to_string(), k.to_owned()))
+                })
+            })
+            .collect::<Vec<_>>();
+
+        Ok(tasks)
+    }
+
+    pub async fn ack_pending_task(&self, status: &Status, stream_id: &str) -> Result<()> {
+        let mut conn = self.operator();
+        let group_name = &get_config().name;
+
+        let keys = &[&format!("{}/processing/{:?}/", group_name, status)];
+
+        Ok(conn.xack(keys[0], group_name, &[stream_id]).await?)
+    }
+
+    pub async fn read_pending_task(&self, status: &Status) -> Result<Vec<(String, String)>> {
+        let mut conn = self.operator();
+        let config = get_config();
+        let read_num = match status {
+            Status::Uncheck => config.read_check_num,
+            Status::Unsend => config.read_send_num,
+            _ => 0,
+        };
+
+        let keys = &[&format!("{}/processing/{:?}/", config.name, status)];
+
+        let iter: streams::StreamReadReply = conn
+            .xpending_count(keys, config.name.clone(), "-", "+", read_num)
+            .await
+            .map_err(|e| {
+                debug!("xpending error: {}", e);
+                e
+            })?;
+
+        let tasks = iter
+            .keys
+            .iter()
+            .flat_map(|key| {
+                key.ids.iter().filter_map(|id| {
+                    id.map
+                        .keys()
+                        .next()?
+                        .rsplit('/')
+                        .last()
+                        .map(|k| (id.id.to_string(), k.to_owned()))
+                })
+            })
+            .collect::<Vec<_>>();
 
         Ok(tasks)
     }
