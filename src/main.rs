@@ -287,6 +287,7 @@ async fn run(opts: RunOpts) -> Result<()> {
                     }
 
                     if !tasks.is_empty() {
+                        info!("read pending tasks: {}", tasks.len());
                         recycle_task_interval.reset();
                     }
 
@@ -302,11 +303,13 @@ async fn run(opts: RunOpts) -> Result<()> {
                         .scan_match::<String, String>(format!("{}/task/status/*", name))
                         .await
                     {
+                        let mut recycled_task_num = 0;
                         for _ in 0..recycle_task_num {
                             if let Some(key_str) = iter.next_item().await {
                                 if let Some(init_hash) = key_str.split('/').last() {
                                     if let Ok(status) = state.storage.load_status(init_hash).await {
                                         info!("recycle {status:?} task: {}", init_hash);
+                                        recycled_task_num += 1;
                                         let state = state.clone();
                                         let init_hash = init_hash.to_string();
                                         match status {
@@ -329,6 +332,7 @@ async fn run(opts: RunOpts) -> Result<()> {
                                 }
                             }
                         }
+                        info!("recycled tasks num: {recycled_task_num}");
                     }
                 }
             }
