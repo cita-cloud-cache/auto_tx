@@ -262,38 +262,48 @@ async fn run(opts: RunOpts) -> Result<()> {
                 _ = pending_task_interval.tick() => {
                     let mut tasks = vec![];
 
-                    if let Ok(send_tasks) = state.storage.read_pending_task(&Status::Unsend).await {
-                        send_tasks.iter().for_each( |(xid, init_hash)| {
-                            let state = state.clone();
-                            let init_hash = init_hash.to_string();
-                            let xid = xid.to_string();
-                            tasks.push(tokio::spawn(async move {
-                                send_task(&init_hash, &state).await;
-                                xid
-                            }));
-                        });
+                    match state.storage.read_pending_task(&Status::Unsend).await {
+                        Ok(send_tasks) => {
+                            send_tasks.iter().for_each( |(xid, init_hash)| {
+                                let state = state.clone();
+                                let init_hash = init_hash.to_string();
+                                let xid = xid.to_string();
+                                tasks.push(tokio::spawn(async move {
+                                    send_task(&init_hash, &state).await;
+                                    xid
+                                }));
+                            });
+                        }
+                        Err(e) => {
+                            warn!("read pending unsend tasks failed: {}", e);
+                        }
                     }
 
-                    if let Ok(check_tasks) = state.storage.read_pending_task(&Status::Uncheck).await {
-                        check_tasks.iter().for_each( |(xid, init_hash)| {
-                            let state = state.clone();
-                            let init_hash = init_hash.to_string();
-                            let xid = xid.to_string();
-                            tasks.push(tokio::spawn(async move {
-                                check_task(&init_hash, &state).await;
-                                xid
-                            }));
-                        });
+                    match state.storage.read_pending_task(&Status::Uncheck).await {
+                        Ok(check_tasks) => {
+                            check_tasks.iter().for_each( |(xid, init_hash)| {
+                                let state = state.clone();
+                                let init_hash = init_hash.to_string();
+                                let xid = xid.to_string();
+                                tasks.push(tokio::spawn(async move {
+                                    check_task(&init_hash, &state).await;
+                                    xid
+                                }));
+                            });
+                        }
+                        Err(e) => {
+                            warn!("read pending uncheck tasks failed: {}", e);
+                        }
                     }
 
                     if !tasks.is_empty() {
                         info!("read pending tasks: {}", tasks.len());
                         recycle_task_interval.reset();
-                    }
 
-                    for task in tasks {
-                        if let Ok(xid) = task.await {
-                            state.storage.ack_pending_task(&Status::Unsend, &xid).await.ok();
+                        for task in tasks {
+                            if let Ok(xid) = task.await {
+                                state.storage.ack_pending_task(&Status::Unsend, &xid).await.ok();
+                            }
                         }
                     }
                 }
