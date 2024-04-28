@@ -366,7 +366,7 @@ async fn run(opts: RunOpts) -> Result<()> {
 }
 
 async fn send_task(init_hash: String, state: Arc<AutoTxGlobalState>) {
-    if let Ok(send_task) = state.storage.load_send_task(&init_hash).await {
+    if let Ok(mut send_task) = state.storage.load_send_task(&init_hash).await {
         if state.storage.try_lock_task(&init_hash).await.is_ok() {
             let chain_name = send_task.base_data.chain_name.as_ref();
             if let Ok(mut chain) = state.chains.get_chain(chain_name).await {
@@ -375,6 +375,12 @@ async fn send_task(init_hash: String, state: Arc<AutoTxGlobalState>) {
                     .process_send_task(&init_hash, &send_task, &state.storage)
                     .await
                 {
+                    send_task =
+                        if let Ok(send_task) = state.storage.load_send_task(&init_hash).await {
+                            send_task
+                        } else {
+                            break;
+                        };
                     info!("send retry: {init_hash} failed: {e}");
                 }
             }
@@ -384,7 +390,7 @@ async fn send_task(init_hash: String, state: Arc<AutoTxGlobalState>) {
 }
 
 async fn check_task(init_hash: String, state: Arc<AutoTxGlobalState>) {
-    if let Ok(check_task) = state.storage.load_check_task(&init_hash).await {
+    if let Ok(mut check_task) = state.storage.load_check_task(&init_hash).await {
         let chain_name = check_task.base_data.chain_name.as_ref();
         if let Ok(mut chain) = state.chains.get_chain(chain_name).await {
             let mut task_retry_interval = tokio::time::interval(tokio::time::Duration::from_secs(
@@ -397,6 +403,13 @@ async fn check_task(init_hash: String, state: Arc<AutoTxGlobalState>) {
             {
                 info!("check retry: {init_hash} failed: {e}");
                 task_retry_interval.tick().await;
+
+                check_task = if let Ok(check_task) = state.storage.load_check_task(&init_hash).await
+                {
+                    check_task
+                } else {
+                    break;
+                };
             }
         }
     }
