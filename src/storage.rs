@@ -114,9 +114,7 @@ impl Storage {
                 key.ids.iter().filter_map(|id| {
                     id.map
                         .keys()
-                        .next()?
-                        .rsplit('/')
-                        .last()
+                        .next()
                         .map(|k| (id.id.to_string(), k.to_owned()))
                 })
             })
@@ -145,7 +143,7 @@ impl Storage {
 
         let keys = &[&format!("{}/processing/{:?}/", config.name, status)];
 
-        let iter: streams::StreamReadReply = conn
+        let iter: streams::StreamPendingCountReply = conn
             .xpending_count(keys, config.name.clone(), "-", "+", read_num)
             .await
             .map_err(|e| {
@@ -153,22 +151,35 @@ impl Storage {
                 e
             })?;
 
-        let tasks = iter
-            .keys
+        let ids = iter
+            .ids
             .iter()
-            .flat_map(|key| {
-                key.ids.iter().filter_map(|id| {
-                    id.map
-                        .keys()
-                        .next()?
-                        .rsplit('/')
-                        .last()
-                        .map(|k| (id.id.to_string(), k.to_owned()))
-                })
-            })
+            .map(|i| i.id.to_string())
             .collect::<Vec<_>>();
 
-        Ok(tasks)
+        if ids.is_empty() {
+            Ok(vec![])
+        } else {
+            let iter: streams::StreamRangeReply = conn
+                .xrange(keys, ids[0].clone(), ids[ids.len() - 1].clone())
+                .await
+                .map_err(|e| {
+                    debug!("xrange error: {}", e);
+                    e
+                })?;
+            let tasks = iter
+                .ids
+                .iter()
+                .filter_map(|id| {
+                    id.map
+                        .keys()
+                        .next()
+                        .map(|k| (id.id.to_string(), k.to_owned()))
+                })
+                .collect::<Vec<_>>();
+
+            Ok(tasks)
+        }
     }
 
     pub async fn store_send_task(&self, init_hash: &str, task: &SendTask) -> Result<()> {

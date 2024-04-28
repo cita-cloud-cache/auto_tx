@@ -202,9 +202,13 @@ async fn run(opts: RunOpts) -> Result<()> {
     tokio::spawn(async move {
         let mut conn = state.storage.operator();
 
-        let mut pending_task_interval =
+        let mut pending_unsend_task_interval =
             tokio::time::interval(tokio::time::Duration::from_secs(pending_task_interval));
-        pending_task_interval.tick().await;
+        pending_unsend_task_interval.tick().await;
+
+        let mut pending_uncheck_task_interval =
+            tokio::time::interval(tokio::time::Duration::from_secs(pending_task_interval));
+        pending_uncheck_task_interval.tick().await;
 
         let mut recycle_task_interval =
             tokio::time::interval(tokio::time::Duration::from_secs(recycle_task_interval));
@@ -214,22 +218,18 @@ async fn run(opts: RunOpts) -> Result<()> {
             tokio::select! {
                 Ok(check_tasks) = state.storage.read_processing_task(&Status::Uncheck) => {
                     if !check_tasks.is_empty() {
-                        pending_task_interval.reset();
-                        recycle_task_interval.reset();
+                        pending_uncheck_task_interval.reset();
 
                         let mut tasks = vec![];
                         check_tasks.iter().for_each( |(xid, init_hash)| {
                             let state = state.clone();
                             let init_hash = init_hash.to_string();
                             let xid = xid.to_string();
-                            tasks.push(tokio::spawn(async move {
-                                check_task(&init_hash, &state).await;
-                                xid
-                            }));
+                            tasks.push((tokio::spawn(check_task(init_hash, state)), xid));
                         });
 
-                        for task in tasks {
-                            if let Ok(xid) = task.await {
+                        for (task, xid) in tasks {
+                            if task.await.is_ok() {
                                 state.storage.ack_pending_task(&Status::Uncheck, &xid).await.ok();
                             }
                         }
@@ -237,29 +237,25 @@ async fn run(opts: RunOpts) -> Result<()> {
                 }
                 Ok(send_tasks) = state.storage.read_processing_task(&Status::Unsend) => {
                     if !send_tasks.is_empty() {
-                        pending_task_interval.reset();
-                        recycle_task_interval.reset();
+                        pending_unsend_task_interval.reset();
 
                         let mut tasks = vec![];
                         send_tasks.iter().for_each( |(xid, init_hash)| {
                             let state = state.clone();
                             let init_hash = init_hash.to_string();
                             let xid = xid.to_string();
-                            tasks.push(tokio::spawn(async move {
-                                send_task(&init_hash, &state).await;
-                                xid
-                            }));
+                            tasks.push((tokio::spawn(send_task(init_hash, state)), xid));
                         });
 
-                        for task in tasks {
-                            if let Ok(xid) = task.await {
+                        for (task, xid) in tasks {
+                            if task.await.is_ok() {
                                 state.storage.ack_pending_task(&Status::Unsend, &xid).await.ok();
                             }
                         }
                     }
                 }
                 // prevention of pending msg
-                _ = pending_task_interval.tick() => {
+                _ = pending_unsend_task_interval.tick() => {
                     let mut tasks = vec![];
 
                     match state.storage.read_pending_task(&Status::Unsend).await {
@@ -268,10 +264,7 @@ async fn run(opts: RunOpts) -> Result<()> {
                                 let state = state.clone();
                                 let init_hash = init_hash.to_string();
                                 let xid = xid.to_string();
-                                tasks.push(tokio::spawn(async move {
-                                    send_task(&init_hash, &state).await;
-                                    xid
-                                }));
+                                tasks.push((tokio::spawn(send_task(init_hash, state)), xid));
                             });
                         }
                         Err(e) => {
@@ -279,16 +272,34 @@ async fn run(opts: RunOpts) -> Result<()> {
                         }
                     }
 
+                    if !tasks.is_empty() {
+                        info!("read pending unsend tasks: {}", tasks.len());
+                        recycle_task_interval.reset();
+
+                        for (task, xid) in tasks {
+                            match task.await {
+                                Ok(_) => {
+                                    state.storage.ack_pending_task(&Status::Unsend, &xid).await
+                                        .map_err(|e| debug!("ack pending unsend task failed: {}", e))
+                                        .ok();
+                                }
+                                Err(e) => {
+                                    warn!("retry pending unsend tasks failed: {}", e);
+                                }
+                            }
+                        }
+                    }
+                }
+                _ = pending_uncheck_task_interval.tick() => {
+                    let mut tasks = vec![];
+
                     match state.storage.read_pending_task(&Status::Uncheck).await {
                         Ok(check_tasks) => {
                             check_tasks.iter().for_each( |(xid, init_hash)| {
                                 let state = state.clone();
                                 let init_hash = init_hash.to_string();
                                 let xid = xid.to_string();
-                                tasks.push(tokio::spawn(async move {
-                                    check_task(&init_hash, &state).await;
-                                    xid
-                                }));
+                                tasks.push((tokio::spawn(check_task(init_hash, state)), xid));
                             });
                         }
                         Err(e) => {
@@ -297,12 +308,19 @@ async fn run(opts: RunOpts) -> Result<()> {
                     }
 
                     if !tasks.is_empty() {
-                        info!("read pending tasks: {}", tasks.len());
+                        info!("read pending uncheck tasks: {}", tasks.len());
                         recycle_task_interval.reset();
 
-                        for task in tasks {
-                            if let Ok(xid) = task.await {
-                                state.storage.ack_pending_task(&Status::Unsend, &xid).await.ok();
+                        for (task, xid) in tasks {
+                            match task.await {
+                                Ok(_) => {
+                                    state.storage.ack_pending_task(&Status::Uncheck, &xid).await
+                                        .map_err(|e| debug!("ack pending uncheck task failed: {}", e))
+                                        .ok();
+                                }
+                                Err(e) => {
+                                    warn!("retry pending uncheck tasks failed: {}", e);
+                                }
                             }
                         }
                     }
@@ -324,17 +342,10 @@ async fn run(opts: RunOpts) -> Result<()> {
                                         let init_hash = init_hash.to_string();
                                         match status {
                                             Status::Unsend => {
-                                                tokio::spawn(async move {
-                                                    send_task(&init_hash, &state).await;
-                                                });
+                                                tokio::spawn(send_task(init_hash, state));
                                             }
                                             Status::Uncheck => {
-                                                tokio::spawn(async move {
-                                                    check_task(
-                                                        &init_hash,
-                                                        &state,
-                                                    ).await;
-                                                });
+                                                tokio::spawn(check_task(init_hash, state));
                                             }
                                             _ => {}
                                         }
@@ -354,26 +365,26 @@ async fn run(opts: RunOpts) -> Result<()> {
     Ok(())
 }
 
-async fn send_task(init_hash: &str, state: &AutoTxGlobalState) {
-    if let Ok(send_task) = state.storage.load_send_task(init_hash).await {
-        if state.storage.try_lock_task(init_hash).await.is_ok() {
+async fn send_task(init_hash: String, state: Arc<AutoTxGlobalState>) {
+    if let Ok(send_task) = state.storage.load_send_task(&init_hash).await {
+        if state.storage.try_lock_task(&init_hash).await.is_ok() {
             let chain_name = send_task.base_data.chain_name.as_ref();
             if let Ok(mut chain) = state.chains.get_chain(chain_name).await {
                 while let Err(e) = chain
                     .chain_client
-                    .process_send_task(init_hash, &send_task, &state.storage)
+                    .process_send_task(&init_hash, &send_task, &state.storage)
                     .await
                 {
                     info!("send retry: {init_hash} failed: {e}");
                 }
             }
-            state.storage.unlock_task(init_hash).await.ok();
+            state.storage.unlock_task(&init_hash).await.ok();
         }
     }
 }
 
-async fn check_task(init_hash: &str, state: &AutoTxGlobalState) {
-    if let Ok(check_task) = state.storage.load_check_task(init_hash).await {
+async fn check_task(init_hash: String, state: Arc<AutoTxGlobalState>) {
+    if let Ok(check_task) = state.storage.load_check_task(&init_hash).await {
         let chain_name = check_task.base_data.chain_name.as_ref();
         if let Ok(mut chain) = state.chains.get_chain(chain_name).await {
             let mut task_retry_interval = tokio::time::interval(tokio::time::Duration::from_secs(
@@ -381,7 +392,7 @@ async fn check_task(init_hash: &str, state: &AutoTxGlobalState) {
             ));
             while let Err(e) = chain
                 .chain_client
-                .process_check_task(init_hash, &check_task, &state.storage)
+                .process_check_task(&init_hash, &check_task, &state.storage)
                 .await
             {
                 info!("check retry: {init_hash} failed: {e}");
