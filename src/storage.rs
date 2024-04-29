@@ -99,6 +99,7 @@ impl Storage {
 
         let opts = streams::StreamReadOptions::default()
             .group(config.name.clone(), instance_name())
+            .block(config.rpc_timeout as usize)
             .count(read_num);
 
         let iter: streams::StreamReadReply =
@@ -120,7 +121,11 @@ impl Storage {
             })
             .collect::<Vec<_>>();
 
-        Ok(tasks)
+        if tasks.is_empty() {
+            self.read_pending_task(status, true).await
+        } else {
+            Ok(tasks)
+        }
     }
 
     pub async fn ack_pending_task(&self, status: &Status, stream_id: &str) -> Result<()> {
@@ -132,7 +137,11 @@ impl Storage {
         Ok(conn.xack(keys[0], group_name, &[stream_id]).await?)
     }
 
-    pub async fn read_pending_task(&self, status: &Status) -> Result<Vec<(String, String)>> {
+    pub async fn read_pending_task(
+        &self,
+        status: &Status,
+        consumer: bool,
+    ) -> Result<Vec<(String, String)>> {
         let mut conn = self.operator();
         let config = get_config();
         let read_num = match status {
@@ -143,13 +152,28 @@ impl Storage {
 
         let keys = &[&format!("{}/processing/{:?}/", config.name, status)];
 
-        let iter: streams::StreamPendingCountReply = conn
-            .xpending_count(keys, config.name.clone(), "-", "+", read_num)
+        let iter: streams::StreamPendingCountReply = if consumer {
+            conn.xpending_consumer_count(
+                keys,
+                config.name.clone(),
+                "-",
+                "+",
+                read_num,
+                instance_name(),
+            )
             .await
             .map_err(|e| {
                 debug!("xpending error: {}", e);
                 e
-            })?;
+            })?
+        } else {
+            conn.xpending_count(keys, config.name.clone(), "-", "+", read_num)
+                .await
+                .map_err(|e| {
+                    debug!("xpending error: {}", e);
+                    e
+                })?
+        };
 
         let ids = iter
             .ids
@@ -271,7 +295,7 @@ impl Storage {
         let mut conn = self.operator();
         let key = format!("{}/locked_task/{}", config.name, init_hash);
         let options = SetOptions::default()
-            .with_expiration(SetExpiry::EX((config.rpc_timeout * 2) as usize))
+            .with_expiration(SetExpiry::EX((config.max_timeout) as usize))
             .conditional_set(ExistenceCheck::NX);
         Ok(conn.set_options::<String, u8, ()>(key, 0, options).await?)
     }

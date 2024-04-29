@@ -15,8 +15,8 @@ pub async fn get_task(depot: &Depot, req: &Request) -> Result<impl Writer, RESTf
         .obtain::<Arc<AutoTxGlobalState>>()
         .map_err(|e| eyre!("get app_state failed: {e:?}"))?;
 
-    let init_hash = if let Some(user_code) = headers.get("hash") {
-        user_code.to_str()?.to_string()
+    let init_hash = if let Some(init_hash) = headers.get("hash") {
+        init_hash.to_str()?.to_string()
     } else {
         let request_key = if let Some(request_key) = headers.get("request_key") {
             request_key.to_str()?

@@ -45,7 +45,7 @@ use common_rs::{
     redis::{self, AsyncCommands, Redis},
     restful::http_serve,
 };
-use config::{get_config, CitaCreateConfig, Config};
+use config::{get_config, Config};
 use once_cell::sync::OnceCell;
 use salvo::prelude::*;
 use send_tx::handle_send_tx;
@@ -112,8 +112,6 @@ fn main() {
 pub struct AutoTxGlobalState {
     chains: Chains,
     storage: Storage,
-    max_timeout: u32,
-    cita_create_config: Option<CitaCreateConfig>,
 }
 
 impl AutoTxGlobalState {
@@ -126,8 +124,6 @@ impl AutoTxGlobalState {
         Self {
             chains: Chains::new(redis.clone()).await,
             storage: Storage::new(redis).await,
-            max_timeout: config.max_timeout,
-            cita_create_config: config.cita_create_config,
         }
     }
 }
@@ -214,11 +210,17 @@ async fn run(opts: RunOpts) -> Result<()> {
             tokio::time::interval(tokio::time::Duration::from_secs(recycle_task_interval));
         recycle_task_interval.tick().await;
 
+        let mut pending_send_task = false;
+        let mut pending_check_task = false;
+        let mut recycle_task = false;
+
         loop {
             tokio::select! {
                 Ok(check_tasks) = state.storage.read_processing_task(&Status::Uncheck) => {
-                    if !check_tasks.is_empty() {
+                    pending_check_task = check_tasks.is_empty();
+                    if !pending_send_task {
                         pending_uncheck_task_interval.reset();
+                        recycle_task_interval.reset();
 
                         let mut tasks = vec![];
                         check_tasks.iter().for_each( |(xid, init_hash)| {
@@ -236,8 +238,10 @@ async fn run(opts: RunOpts) -> Result<()> {
                     }
                 }
                 Ok(send_tasks) = state.storage.read_processing_task(&Status::Unsend) => {
+                    pending_send_task = send_tasks.is_empty();
                     if !send_tasks.is_empty() {
                         pending_unsend_task_interval.reset();
+                        recycle_task_interval.reset();
 
                         let mut tasks = vec![];
                         send_tasks.iter().for_each( |(xid, init_hash)| {
@@ -255,10 +259,10 @@ async fn run(opts: RunOpts) -> Result<()> {
                     }
                 }
                 // prevention of pending msg
-                _ = pending_unsend_task_interval.tick() => {
+                _ = pending_unsend_task_interval.tick(), if pending_send_task => {
                     let mut tasks = vec![];
 
-                    match state.storage.read_pending_task(&Status::Unsend).await {
+                    match state.storage.read_pending_task(&Status::Unsend, false).await {
                         Ok(send_tasks) => {
                             send_tasks.iter().for_each( |(xid, init_hash)| {
                                 let state = state.clone();
@@ -272,7 +276,8 @@ async fn run(opts: RunOpts) -> Result<()> {
                         }
                     }
 
-                    if !tasks.is_empty() {
+                    recycle_task = tasks.is_empty();
+                    if !recycle_task {
                         info!("read pending unsend tasks: {}", tasks.len());
                         recycle_task_interval.reset();
 
@@ -290,10 +295,10 @@ async fn run(opts: RunOpts) -> Result<()> {
                         }
                     }
                 }
-                _ = pending_uncheck_task_interval.tick() => {
+                _ = pending_uncheck_task_interval.tick(), if pending_check_task => {
                     let mut tasks = vec![];
 
-                    match state.storage.read_pending_task(&Status::Uncheck).await {
+                    match state.storage.read_pending_task(&Status::Uncheck, false).await {
                         Ok(check_tasks) => {
                             check_tasks.iter().for_each( |(xid, init_hash)| {
                                 let state = state.clone();
@@ -307,7 +312,8 @@ async fn run(opts: RunOpts) -> Result<()> {
                         }
                     }
 
-                    if !tasks.is_empty() {
+                    recycle_task = tasks.is_empty();
+                    if !recycle_task {
                         info!("read pending uncheck tasks: {}", tasks.len());
                         recycle_task_interval.reset();
 
@@ -326,7 +332,7 @@ async fn run(opts: RunOpts) -> Result<()> {
                     }
                 }
                 // prevention of lost msg
-                _ = recycle_task_interval.tick() => {
+                _ = recycle_task_interval.tick(), if recycle_task => {
                     if let Ok(mut iter) = conn
                         .scan_match::<String, String>(format!("{}/task/status/*", name))
                         .await
@@ -365,52 +371,54 @@ async fn run(opts: RunOpts) -> Result<()> {
     Ok(())
 }
 
-async fn send_task(init_hash: String, state: Arc<AutoTxGlobalState>) {
-    if let Ok(mut send_task) = state.storage.load_send_task(&init_hash).await {
-        if state.storage.try_lock_task(&init_hash).await.is_ok() {
-            let chain_name = send_task.base_data.chain_name.as_ref();
-            if let Ok(mut chain) = state.chains.get_chain(chain_name).await {
-                while let Err(e) = chain
-                    .chain_client
-                    .process_send_task(&init_hash, &send_task, &state.storage)
-                    .await
-                {
-                    send_task =
-                        if let Ok(send_task) = state.storage.load_send_task(&init_hash).await {
-                            send_task
-                        } else {
-                            break;
-                        };
-                    info!("send retry: {init_hash} failed: {e}");
-                }
-            }
-            state.storage.unlock_task(&init_hash).await.ok();
+async fn send_task(init_hash: String, state: Arc<AutoTxGlobalState>) -> Result<()> {
+    let mut retry = true;
+    while retry {
+        let send_task = state.storage.load_send_task(&init_hash).await?;
+        let chain_name = send_task.base_data.chain_name.as_ref();
+        let mut chain = state.chains.get_chain(chain_name).await?;
+
+        state.storage.try_lock_task(&init_hash).await?;
+
+        match chain
+            .chain_client
+            .process_send_task(&init_hash, &send_task, &state.storage)
+            .await
+        {
+            Ok(_) => retry = false,
+            Err(e) => info!("send retry: {init_hash} failed: {e}"),
         }
+
+        state.storage.unlock_task(&init_hash).await.ok();
     }
+    Ok(())
 }
 
-async fn check_task(init_hash: String, state: Arc<AutoTxGlobalState>) {
-    if let Ok(mut check_task) = state.storage.load_check_task(&init_hash).await {
+async fn check_task(init_hash: String, state: Arc<AutoTxGlobalState>) -> Result<()> {
+    let mut task_retry_interval = tokio::time::interval(tokio::time::Duration::from_secs(
+        get_config().check_retry_interval,
+    ));
+    let mut retry = true;
+    while retry {
+        let check_task = state.storage.load_check_task(&init_hash).await?;
         let chain_name = check_task.base_data.chain_name.as_ref();
-        if let Ok(mut chain) = state.chains.get_chain(chain_name).await {
-            let mut task_retry_interval = tokio::time::interval(tokio::time::Duration::from_secs(
-                get_config().check_retry_interval,
-            ));
-            while let Err(e) = chain
-                .chain_client
-                .process_check_task(&init_hash, &check_task, &state.storage)
-                .await
-            {
+        let mut chain = state.chains.get_chain(chain_name).await?;
+
+        state.storage.try_lock_task(&init_hash).await?;
+
+        match chain
+            .chain_client
+            .process_check_task(&init_hash, &check_task, &state.storage)
+            .await
+        {
+            Ok(_) => retry = false,
+            Err(e) => {
                 info!("check retry: {init_hash} failed: {e}");
                 task_retry_interval.tick().await;
-
-                check_task = if let Ok(check_task) = state.storage.load_check_task(&init_hash).await
-                {
-                    check_task
-                } else {
-                    break;
-                };
             }
         }
+
+        state.storage.unlock_task(&init_hash).await.ok();
     }
+    Ok(())
 }

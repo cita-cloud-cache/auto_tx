@@ -5,7 +5,7 @@ pub mod eth;
 
 use crate::{
     chains::*,
-    config::CitaCreateConfig,
+    config::{get_config, CitaCreateConfig},
     kms::{Account, Kms},
     storage::Storage,
     task::*,
@@ -162,6 +162,7 @@ pub async fn handle(
 ) -> Result<impl Writer, RESTfulError> {
     debug!("chain_name: {chain_name}, user_code: {user_code}, request_key: {request_key}, params: {params:?}");
 
+    let config = get_config();
     // check params
     if params.data.is_empty() {
         return err(CALError::BadRequest, "field \"data\" missing");
@@ -185,7 +186,7 @@ pub async fn handle(
 
     // check if cita_create
     if chain.chain_name
-        == state
+        == config
             .cita_create_config
             .as_ref()
             .unwrap_or(&CitaCreateConfig::default())
@@ -194,7 +195,7 @@ pub async fn handle(
     {
         info!("receive cita create request: request_key: {}", request_key);
         let resp = cita_create::send_cita_create(
-            state.cita_create_config.as_ref().unwrap(),
+            config.cita_create_config.as_ref().unwrap(),
             &params.data,
             &request_key,
         )
@@ -226,9 +227,9 @@ pub async fn handle(
     // get timeout
     let timeout = {
         if let Some(timeout) = params.timeout {
-            (timeout.min(state.max_timeout).max(20) as f64 * 0.8) as u32
+            (timeout.min(config.max_timeout).max(20) as f64 * 0.8) as u32
         } else {
-            state.max_timeout
+            config.max_timeout
         }
     };
 
