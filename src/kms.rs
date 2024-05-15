@@ -78,8 +78,8 @@ struct SignResponseData {
     public_key: Option<String>,
 }
 
-async fn sign_message(user_code: &str, crypto_type: &str, message: &str) -> Result<Vec<u8>> {
-    let client = reqwest::Client::new();
+fn sign_message(user_code: &str, crypto_type: &str, message: &str) -> Result<Vec<u8>> {
+    let client = reqwest::blocking::Client::new();
     let kms_url = KMS.get().unwrap().clone() + "/sign";
 
     let data = serde_json::json!({
@@ -92,10 +92,8 @@ async fn sign_message(user_code: &str, crypto_type: &str, message: &str) -> Resu
         .post(kms_url)
         .json(&data)
         .send()
-        .await
         .map_err(|e| eyre!("sign_message failed: {e}"))?
         .json::<SignResponse>()
-        .await
         .map_err(|e| eyre!("sign_message failed: {e}"))?;
 
     debug!("sign_message resp: {:?}", resp);
@@ -176,19 +174,17 @@ impl Kms for Account {
     }
 
     async fn sign(&self, msg: &str) -> Result<Vec<u8>> {
-        sign_message(&self.user_code, &self.crypto_type, msg).await
+        sign_message(&self.user_code, &self.crypto_type, msg)
     }
 }
 
-#[async_trait]
 impl Key for Account {
     fn sign(&self, _message: &[u8], _chain_id: Option<u64>) -> Result<Signature, SigningError> {
         unreachable!("only support EIP1559TX")
     }
 
-    async fn sign_message(&self, msg: &[u8]) -> Result<Signature, SigningError> {
+    fn sign_message(&self, msg: &[u8]) -> Result<Signature, SigningError> {
         let sig_vec = sign_message(&self.user_code, &self.crypto_type, &hex::encode(msg))
-            .await
             .map_err(|_| SigningError::InvalidMessage)?;
 
         if sig_vec.len() != 65 {

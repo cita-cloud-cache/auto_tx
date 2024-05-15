@@ -336,7 +336,7 @@ impl AutoTx for CitaCloudClient {
         let hash_str = hash.encode_hex::<String>();
         let request_key = &check_task.base_data.request_key;
         let get_transaction_receipt_timeout = tokio::time::timeout(
-            std::time::Duration::from_secs(RPC_TIMEOUT),
+            std::time::Duration::from_secs(3),
             self.get_transaction_receipt(Hash { hash }),
         );
         match get_transaction_receipt_timeout.await {
