@@ -12,10 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use common_rs::{
-    etcd::{EtcdConfig, ServiceRegisterConfig},
-    log::LogConfig,
-};
+use common_rs::{log::LogConfig, redis::RedisConfig, service_register::ServiceRegisterConfig};
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 
@@ -55,23 +52,27 @@ pub struct Config {
 
     pub log_config: LogConfig,
 
-    pub process_interval: u64,
+    pub read_send_num: usize,
 
-    pub fast_mode: bool,
+    pub read_check_num: usize,
+
+    pub pending_task_interval: u64,
+
+    pub check_retry_interval: u64,
+
+    pub recycle_task_interval: u64,
+
+    pub recycle_task_num: u64,
 
     pub max_timeout: u32,
 
-    pub get_tasks_limit: i64,
+    pub chain_config_ttl: u64,
 
-    pub chain_config_ttl: i64,
-
-    pub request_key_ttl: i64,
+    pub request_key_ttl: u64,
 
     pub rpc_timeout: u64,
 
-    pub try_lock_timeout: u64,
-
-    pub etcd_config: EtcdConfig,
+    pub redis_config: RedisConfig,
 
     pub cita_create_config: Option<CitaCreateConfig>,
 
@@ -86,15 +87,17 @@ impl Default for Config {
             kms_url: Default::default(),
             log_config: Default::default(),
             max_timeout: 600,
-            process_interval: 5,
-            get_tasks_limit: 2000,
+            read_send_num: 100,
+            read_check_num: 10,
+            pending_task_interval: 120,
+            check_retry_interval: 1,
+            recycle_task_interval: 150,
+            recycle_task_num: 100,
             chain_config_ttl: 3,
             rpc_timeout: 1000,
-            try_lock_timeout: 200,
             cita_create_config: None,
-            etcd_config: Default::default(),
+            redis_config: Default::default(),
             service_register_config: Default::default(),
-            fast_mode: false,
             request_key_ttl: 600,
         }
     }

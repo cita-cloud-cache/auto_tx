@@ -1,7 +1,6 @@
 name = "auto_tx"
 port = 3000
 kms_url = "http://api.rivtower.cc/rivtrust-kms"
-get_tasks_limit = 2000
 
 #[cita_create_config]
 #chain_name = ""
@@ -13,14 +12,10 @@ get_tasks_limit = 2000
 #verify = ""
 #dapp_name = ""
 
-[etcd_config]
+[redis_config]
 endpoints = [
-    "127.0.0.1:2379",
+    "redis://127.0.0.1/",
 ]
-# millis
-timeout = 2000
-# secs
-keep_alive = 300
 
 [service_register_config]
 url = "http://auto_tx.chain-cache.svc.cluster.local:3000"

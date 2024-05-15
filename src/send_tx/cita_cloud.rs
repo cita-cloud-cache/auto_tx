@@ -19,6 +19,7 @@ use cita_cloud_proto::executor::CallRequest;
 use cita_cloud_proto::retry::RetryClient;
 use cita_cloud_proto::status_code::StatusCodeEnum;
 use color_eyre::eyre::{eyre, Result};
+use common_rs::redis::AsyncCommands;
 use ethabi::ethereum_types::U256;
 use hex::ToHex;
 use prost::Message;
@@ -125,11 +126,14 @@ impl CitaCloudClient {
     async fn get_system_config(&mut self, storage: Option<&Storage>) -> Result<SystemConfig> {
         let key = format!("{}/ChainSysConfig/{}", get_config().name, self.chain_name);
         if let Some(storage) = storage {
-            if let Ok(system_config_bytes) = storage.get(key.clone()).await {
-                let system_config = SystemConfig::decode::<std::collections::VecDeque<u8>>(
-                    system_config_bytes.into(),
-                )?;
-                return Ok(system_config);
+            if let Ok(system_config_bytes) = storage.operator().get(key.clone()).await {
+                let system_config_bytes: Vec<u8> = system_config_bytes;
+                if !system_config_bytes.is_empty() {
+                    let system_config = SystemConfig::decode::<std::collections::VecDeque<u8>>(
+                        system_config_bytes.into(),
+                    )?;
+                    return Ok(system_config);
+                }
             }
         }
         let client = self.controller_client.get_client_mut();
@@ -144,9 +148,13 @@ impl CitaCloudClient {
                 buf
             };
             storage
-                .put_with_lease(key, system_config_bytes, get_config().chain_config_ttl)
-                .await
-                .ok();
+                .operator()
+                .set_ex(
+                    key,
+                    system_config_bytes,
+                    get_config().chain_config_ttl as u64,
+                )
+                .await?;
         }
         Ok(system_config)
     }
@@ -281,7 +289,11 @@ impl AutoTx for CitaCloudClient {
         let timeout = self.try_update_timeout(timeout, storage).await?;
 
         // get Gas
-        let gas = self.estimate_gas(init_task, storage).await;
+        let gas = if init_task.gas <= BASE_QUOTA {
+            self.estimate_gas(init_task, storage).await
+        } else {
+            Gas { gas: init_task.gas }
+        };
 
         // get tx
         let mut send_task = SendTask {
@@ -348,7 +360,7 @@ impl AutoTx for CitaCloudClient {
         match send_result {
             Ok(hash) => {
                 let hash_to_check = hash.hash;
-                storage.store_status(init_hash, &Status::Uncheck).await?;
+                storage.update_status(init_hash, &Status::Uncheck).await?;
                 storage
                     .store_hash_to_check(
                         init_hash,
@@ -373,6 +385,9 @@ impl AutoTx for CitaCloudClient {
                     e.to_string(),
                     timeout.get_cita_timeout().remain_time
                 );
+                if e.to_string().contains("DupTransaction") {
+                    return Ok(init_hash.to_string());
+                }
                 match self.try_update_timeout(timeout, storage).await {
                     Ok(new_timeout) => {
                         debug!("{init_hash} new_timeout: {new_timeout} ");
@@ -396,6 +411,7 @@ impl AutoTx for CitaCloudClient {
                                 init_hash,
                                 timeout.get_cita_timeout().remain_time
                             );
+                            return Ok(init_hash.to_string());
                         }
                     }
                 }
@@ -410,7 +426,7 @@ impl AutoTx for CitaCloudClient {
         init_hash: &str,
         check_task: &CheckTask,
         storage: &Storage,
-    ) -> Result<TaskResult> {
+    ) -> Result<()> {
         debug!("process_check_task: {:?}", check_task);
         let hash = check_task.hash_to_check.hash.clone();
         let hash_str = hash.encode_hex::<String>();
@@ -435,7 +451,7 @@ impl AutoTx for CitaCloudClient {
                         init_hash, hash_str
                     );
 
-                    Ok(auto_tx_result)
+                    Ok(())
                 }
                 "Out of quota." => {
                     // self_update and resend
@@ -448,6 +464,7 @@ impl AutoTx for CitaCloudClient {
                                 "uncheck task: {} check failed: out of gas, hash: {}, self_update and resend, gas: {}",
                                 init_hash, hash_str, gas.gas
                             );
+                            Ok(())
                         }
                         Err(e) => {
                             if e.to_string().as_str() == "reach quota_limit" {
@@ -455,11 +472,12 @@ impl AutoTx for CitaCloudClient {
                                     TaskResult::failed(Some(hash_str), e.to_string());
                                 storage.finalize_task(init_hash, &auto_tx_result).await?;
                                 warn!("uncheck task: {} failed: reach quota_limit", init_hash,);
+                                Ok(())
+                            } else {
+                                Err(eyre!(receipt.error_message))
                             }
                         }
                     }
-
-                    Err(eyre!(receipt.error_message))
                 }
                 e => {
                     // record fail
@@ -470,7 +488,7 @@ impl AutoTx for CitaCloudClient {
                         init_hash, e, hash_str,
                     );
 
-                    Err(eyre!(e.to_owned()))
+                    Ok(())
                 }
             },
             Ok(Err(e)) => {
@@ -494,6 +512,7 @@ impl AutoTx for CitaCloudClient {
                                 init_hash,
                                 timeout.get_cita_timeout().remain_time
                             );
+                            return Ok(());
                         }
                     }
                     Err(e) => {
@@ -505,6 +524,7 @@ impl AutoTx for CitaCloudClient {
                                 init_hash,
                                 timeout.get_cita_timeout().remain_time
                             );
+                            return Ok(());
                         }
                     }
                 }

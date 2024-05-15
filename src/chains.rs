@@ -17,7 +17,7 @@ use crate::{
     send_tx::{cita::CitaClient, cita_cloud::CitaCloudClient, eth::EthClient},
 };
 use color_eyre::eyre::{eyre, Result};
-use common_rs::etcd::{Etcd, EtcdConfig};
+use common_rs::redis::{AsyncCommands, Redis};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 use tokio::sync::RwLock;
@@ -118,22 +118,22 @@ impl Chain {
 #[derive(Clone)]
 pub struct Chains {
     serve_chains: Arc<RwLock<HashMap<String, Chain>>>,
-    config_center: Etcd,
+    config_center: Redis,
 }
 
 impl Chains {
-    pub async fn new(etcd_config: &EtcdConfig) -> Self {
+    pub async fn new(redis: Redis) -> Self {
         let chains = HashMap::new();
         Self {
             serve_chains: Arc::new(RwLock::new(chains)),
-            config_center: Etcd::new(etcd_config).await.unwrap(),
+            config_center: redis,
         }
     }
 
     async fn request_chain_info(&self, chain_name: &str) -> Result<Chain> {
         let key = format!("{}/ChainInfo/{}", get_config().name, chain_name);
-        let kv = self.config_center.get(key).await?;
-        let chain_info: ChainInfo = serde_json::from_str(kv.value_str()?)?;
+        let value: String = self.config_center.conn().get(key).await?;
+        let chain_info: ChainInfo = serde_json::from_str(&value)?;
         Chain::new(chain_name, chain_info).await
     }
 
