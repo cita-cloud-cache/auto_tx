@@ -16,7 +16,6 @@ use cita_cloud_proto::controller::{
 use cita_cloud_proto::evm::rpc_service_client::RpcServiceClient as EvmRpcServiceClient;
 use cita_cloud_proto::evm::{ByteQuota, Receipt};
 use cita_cloud_proto::executor::CallRequest;
-use cita_cloud_proto::retry::RetryClient;
 use cita_cloud_proto::status_code::StatusCodeEnum;
 use color_eyre::eyre::{eyre, Result};
 use common_rs::redis::AsyncCommands;
@@ -79,15 +78,15 @@ async fn get_raw_tx(
 #[derive(Clone, Debug)]
 pub struct CitaCloudClient {
     pub chain_name: String,
-    pub controller_client: RetryClient<ControllerRpcServiceClient<InterceptedSvc>>,
-    pub evm_client: RetryClient<EvmRpcServiceClient<InterceptedSvc>>,
+    pub controller_client: ControllerRpcServiceClient<InterceptedSvc>,
+    pub evm_client: EvmRpcServiceClient<InterceptedSvc>,
 }
 
 macro_rules! cita_cloud_method {
     ($fn_name:ident, $ret:ty, $client:ident, $input:ty) => {
         impl CitaCloudClient {
             async fn $fn_name(&mut self, arg: $input) -> Result<$ret> {
-                let client = self.$client.get_client_mut();
+                let mut client = self.$client.clone();
                 let fn_name = stringify!($fn_name);
                 client
                     .$fn_name(arg)
@@ -112,10 +111,15 @@ cita_cloud_method!(estimate_quota, ByteQuota, evm_client, CallRequest);
 impl CitaCloudClient {
     pub fn new(url: &str, name: &str) -> Result<Self> {
         let controller_addr = url.to_string() + ":50004";
-        let controller_client =
-            ClientOptions::new("controller".to_string(), controller_addr).connect_rpc()?;
+        let controller_client = ClientOptions::new("controller".to_string(), controller_addr)
+            .connect_rpc()?
+            .get_client()
+            .clone();
         let evm_addr = url.to_string() + ":50002";
-        let evm_client = ClientOptions::new("evm".to_string(), evm_addr).connect_evm()?;
+        let evm_client = ClientOptions::new("evm".to_string(), evm_addr)
+            .connect_evm()?
+            .get_client()
+            .clone();
         Ok(Self {
             chain_name: name.to_owned(),
             controller_client,
@@ -136,7 +140,7 @@ impl CitaCloudClient {
                 }
             }
         }
-        let client = self.controller_client.get_client_mut();
+        let mut client = self.controller_client.clone();
         let system_config = client
             .get_system_config(Empty {})
             .await
