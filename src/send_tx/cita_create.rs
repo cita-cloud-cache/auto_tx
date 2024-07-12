@@ -46,6 +46,7 @@ pub struct CitaCreateResponse {
 #[derive(Deserialize, Debug)]
 pub struct CitaCreateResponseData {
     pub deployTxHash: String,
+    #[allow(dead_code)]
     pub contractId: String,
     pub errMsg: String,
     pub contractAddress: String,

@@ -133,9 +133,7 @@ impl CitaCloudClient {
             if let Ok(system_config_bytes) = storage.operator().get(key.clone()).await {
                 let system_config_bytes: Vec<u8> = system_config_bytes;
                 if !system_config_bytes.is_empty() {
-                    let system_config = SystemConfig::decode::<std::collections::VecDeque<u8>>(
-                        system_config_bytes.into(),
-                    )?;
+                    let system_config = SystemConfig::decode(&mut system_config_bytes.as_slice())?;
                     return Ok(system_config);
                 }
             }
@@ -343,9 +341,7 @@ impl AutoTx for CitaCloudClient {
     ) -> Result<String> {
         debug!("process_send_task: {:?}", task);
         let raw_tx = if let Some(raw_tx_bytes) = &task.raw_transaction_bytes {
-            RawTransaction::decode::<std::collections::VecDeque<u8>>(
-                raw_tx_bytes.bytes.clone().into(),
-            )?
+            RawTransaction::decode(&mut raw_tx_bytes.bytes.as_slice())?
         } else {
             // get tx
             let mut cita_cloud_tx = CitaCloudTransaction::from(task);

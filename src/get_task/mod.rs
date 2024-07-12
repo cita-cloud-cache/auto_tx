@@ -1,20 +1,19 @@
-use crate::AutoTxGlobalState;
+use crate::{task::Status, AutoTxGlobalState};
 
-use color_eyre::eyre::{eyre, Result};
+use color_eyre::eyre::Result;
 use common_rs::{
     error::CALError,
-    restful::{err, ok, RESTfulError},
+    restful::{
+        axum::{extract::State, http::HeaderMap, response::IntoResponse},
+        err, ok, RESTfulError,
+    },
 };
-use salvo::prelude::*;
 use std::sync::Arc;
 
-#[handler]
-pub async fn get_task(depot: &Depot, req: &Request) -> Result<impl Writer, RESTfulError> {
-    let headers = req.headers().clone();
-    let state = depot
-        .obtain::<Arc<AutoTxGlobalState>>()
-        .map_err(|e| eyre!("get app_state failed: {e:?}"))?;
-
+pub async fn get_task(
+    State(state): State<Arc<AutoTxGlobalState>>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, RESTfulError> {
     let init_hash = if let Some(init_hash) = headers.get("hash") {
         init_hash.to_str()?.to_string()
     } else {
@@ -41,6 +40,17 @@ pub async fn get_task(depot: &Depot, req: &Request) -> Result<impl Writer, RESTf
         .load_task(&init_hash)
         .await
         .map_err(|_| CALError::NotFound)?;
+
+    match task.status {
+        Status::Uncheck | Status::Unsend => {
+            state
+                .storage
+                .send_processing_task(&task.init_hash, &task.status)
+                .await
+                .ok();
+        }
+        _ => {}
+    }
 
     ok(serde_json::to_value(task)?)
 }

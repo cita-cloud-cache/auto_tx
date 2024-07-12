@@ -43,11 +43,16 @@ use common_rs::{
     configure::file_config,
     log,
     redis::{self, AsyncCommands, Redis},
-    restful::http_serve,
+    restful::{
+        axum::{
+            routing::{get, post},
+            Router,
+        },
+        http_serve,
+    },
 };
 use config::{get_config, Config};
 use once_cell::sync::OnceCell;
-use salvo::prelude::*;
 use send_tx::handle_send_tx;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -115,12 +120,7 @@ pub struct AutoTxGlobalState {
 }
 
 impl AutoTxGlobalState {
-    async fn new(config: Config) -> Self {
-        let redis = Redis::new(&config.redis_config)
-            .await
-            .map_err(|e| error!("redis connect failed: {e}"))
-            .unwrap();
-
+    async fn new(redis: Redis) -> Self {
         Self {
             chains: Chains::new(redis.clone()).await,
             storage: Storage::new(redis).await,
@@ -176,21 +176,21 @@ async fn run(opts: RunOpts) -> Result<()> {
         ..
     } = config.clone();
 
+    let redis = redis::Redis::new(&config.redis_config).await?;
     if let Some(service_register_config) = &config.service_register_config {
-        let redis = redis::Redis::new(&config.redis_config).await?;
         redis
             .service_register(&service_name, service_register_config.clone())
             .await
             .ok();
     }
 
-    let state = Arc::new(AutoTxGlobalState::new(config).await);
+    let state = Arc::new(AutoTxGlobalState::new(redis).await);
 
     let router = Router::new()
-        .hoop(affix::inject(state.clone()))
-        .push(Router::with_path("/api/<chain_name>/send_tx").post(handle_send_tx))
-        .push(Router::with_path("/api/<chain_name>/receipt/<hash>").get(get_receipt_handler))
-        .push(Router::with_path("/api/task").post(get_task_handler));
+        .route("/api/<chain_name>/send_tx", post(handle_send_tx))
+        .route("/api/<chain_name>/receipt/<hash>", get(get_receipt_handler))
+        .route("/api/task", post(get_task_handler))
+        .with_state(state.clone());
 
     info!("router: {:?}", router);
 
@@ -366,7 +366,7 @@ async fn run(opts: RunOpts) -> Result<()> {
         }
     });
 
-    http_serve(&service_name, port, router).await;
+    http_serve(&service_name, port, router).await?;
 
     Ok(())
 }

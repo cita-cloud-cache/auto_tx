@@ -73,6 +73,10 @@ store_and_load!(crate, TaskResult, task_result, "result");
 impl Storage {
     pub async fn update_status(&self, init_hash: &str, status: &Status) -> Result<()> {
         self.store_status(init_hash, status).await?;
+        self.send_processing_task(init_hash, status).await
+    }
+
+    pub async fn send_processing_task(&self, init_hash: &str, status: &Status) -> Result<()> {
         let mut conn = self.operator();
         let key = format!("{}/processing/{:?}/", get_config().name, status);
         conn.xadd::<&str, &str, &str, &str, ()>(&key, "*", &[(init_hash, "")])

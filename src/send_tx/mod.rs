@@ -12,13 +12,20 @@ use crate::{
     util::{add_0x, remove_quotes_and_0x},
     AutoTxGlobalState, RequestParams,
 };
-use color_eyre::eyre::{eyre, Result};
+use color_eyre::eyre::Result;
 use common_rs::{
     error::CALError,
-    restful::{err, ok, RESTfulError},
+    restful::{
+        axum::{
+            extract::{Query, State},
+            http::HeaderMap,
+            response::IntoResponse,
+            Json,
+        },
+        err, ok, RESTfulError,
+    },
 };
-use salvo::prelude::*;
-use serde_json::json;
+use serde_json::{json, Value};
 use std::sync::Arc;
 
 pub const DEFAULT_QUOTA: u64 = 10_000_000;
@@ -121,9 +128,12 @@ impl AutoTx for ChainClient {
     }
 }
 
-#[handler]
-pub async fn handle_send_tx(depot: &Depot, req: &mut Request) -> Result<impl Writer, RESTfulError> {
-    let headers = req.headers().clone();
+pub async fn handle_send_tx(
+    State(state): State<Arc<AutoTxGlobalState>>,
+    headers: HeaderMap,
+    Query(params): Query<Value>,
+    Json(body): Json<RequestParams>,
+) -> Result<impl IntoResponse, RESTfulError> {
     let request_key = if let Some(request_key) = headers.get("request_key") {
         request_key.to_str()?
     } else {
@@ -134,18 +144,13 @@ pub async fn handle_send_tx(depot: &Depot, req: &mut Request) -> Result<impl Wri
     } else {
         return err(CALError::BadRequest, "user_code missing");
     };
-    let chain_name = if let Some(chain_name) = req.param::<String>("chain_name") {
-        chain_name
+    let chain_name = if let Some(chain_name) = params.get("chain_name") {
+        chain_name.to_string()
     } else {
         return err(CALError::BadRequest, "chain_name missing");
     };
 
-    let state = depot
-        .obtain::<Arc<AutoTxGlobalState>>()
-        .map_err(|e| eyre!("get app_state failed: {e:?}"))?;
-
-    let params = req.parse_body().await?;
-    handle(state, request_key, user_code, chain_name, params)
+    handle(&state, request_key, user_code, chain_name, body)
         .await
         .map_err(|e| {
             warn!("request: {} failed: {:?}", request_key, e);
@@ -159,7 +164,7 @@ pub async fn handle(
     user_code: &str,
     chain_name: String,
     params: RequestParams,
-) -> Result<impl Writer, RESTfulError> {
+) -> Result<impl IntoResponse, RESTfulError> {
     debug!("chain_name: {chain_name}, user_code: {user_code}, request_key: {request_key}, params: {params:?}");
 
     let config = get_config();
@@ -205,6 +210,7 @@ pub async fn handle(
                 if data.errMsg.is_empty() {
                     data.contractAddress = remove_quotes_and_0x(&data.contractAddress);
                     data.deployTxHash = remove_quotes_and_0x(&data.deployTxHash);
+                    debug!("cita create request data: {:?}", &data);
                     let result =
                         TaskResult::success(data.deployTxHash.clone(), Some(data.contractAddress));
                     state.storage.finalize_task(&request_key, &result).await?;
