@@ -8,7 +8,7 @@ docker build -t citacloudcache/auto_tx .
 
 ```
 $ auto_tx -h
-auto_tx 0.1.0
+auto_tx 1.2.0
 Rivtower Technologies <contact@rivtower.com>
 
 Usage: auto_tx <COMMAND>
@@ -31,7 +31,7 @@ docker build -t citacloudcache/auto_tx .
 
 ```
 $ auto_tx -h
-auto_tx 0.1.0
+auto_tx 1.2.0
 Rivtower Technologies <contact@rivtower.com>
 
 Usage: auto_tx <COMMAND>
