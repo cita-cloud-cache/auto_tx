@@ -17,7 +17,7 @@ use common_rs::{
     error::CALError,
     restful::{
         axum::{
-            extract::{Query, State},
+            extract::{Path, State},
             http::HeaderMap,
             response::IntoResponse,
             Json,
@@ -25,7 +25,7 @@ use common_rs::{
         err, ok, RESTfulError,
     },
 };
-use serde_json::{json, Value};
+use serde_json::json;
 use std::sync::Arc;
 
 pub const DEFAULT_QUOTA: u64 = 10_000_000;
@@ -131,9 +131,10 @@ impl AutoTx for ChainClient {
 pub async fn handle_send_tx(
     State(state): State<Arc<AutoTxGlobalState>>,
     headers: HeaderMap,
-    Query(params): Query<Value>,
+    Path(chain_name): Path<String>,
     Json(body): Json<RequestParams>,
 ) -> Result<impl IntoResponse, RESTfulError> {
+    debug!("handle_send_tx");
     let request_key = if let Some(request_key) = headers.get("request_key") {
         request_key.to_str()?
     } else {
@@ -143,11 +144,6 @@ pub async fn handle_send_tx(
         user_code.to_str()?
     } else {
         return err(CALError::BadRequest, "user_code missing");
-    };
-    let chain_name = if let Some(chain_name) = params.get("chain_name") {
-        chain_name.to_string()
-    } else {
-        return err(CALError::BadRequest, "chain_name missing");
     };
 
     handle(&state, request_key, user_code, chain_name, body)

@@ -1,34 +1,33 @@
-name = "auto_tx"
+name = "auto-api-latest"
 port = 3000
-kms_url = "http://api.rivtower.cc/rivtrust-kms"
-
-#[cita_create_config]
-#chain_name = ""
-#create_url = ""
-#accessid = ""
-#access_secret = ""
-#appid = ""
-#appsecret = ""
-#verify = ""
-#dapp_name = ""
+kms_url = "http://kms-latest/api/keys"
+check_retry_interval = 2
+pending_task_interval = 20
+recycle_task_interval = 20
+recycle_task_num = 500
+read_send_num = 500
+read_check_num = 500
+request_key_ttl = 600
+chain_config_ttl = 600
+rpc_timeout = 2000
 
 [redis_config]
 endpoints = [
-    "redis://127.0.0.1/",
+    "redis://redis-cluster",
 ]
 
 [service_register_config]
-url = "http://auto_tx.chain-cache.svc.cluster.local:3000"
+url = "http://auto-api-latest.chain-cache.svc.cluster.local"
 ttl = 60
 tags = [
-    "traefik/http/middlewares/cache-auto-tx-stripprefix/stripprefix/prefixes=/auto_tx",
-    "traefik/http/routers/auto_tx/middlewares=cache-forward-auth,cache-auto-tx-stripprefix",
-    "traefik/http/routers/auto_tx/rule=PathPrefix(`/auto_tx`) && (Headers(`version`, `latest`) || !HeadersRegexp(`version`, `.*?`))",
+    "traefik/http/middlewares/auto-api-latest-stripprefix/stripprefix/prefixes=/auto_api",
+    "traefik/http/routers/auto-api-latest/middlewares=auto-api-latest-stripprefix",
+    "traefik/http/routers/auto-api-latest/rule=PathPrefix(`/auto_api/`) && (Header(`version`, `latest`) || Query(`version=latest`))",
 ]
 
 [log_config]
-max_level = "info"
-filter = "info"
-# max_level = "debug"
-# filter = "debug,hyper=info,opendal=info,sled=info,reqwest=info,h2=info,tower=info"
+# max_level = "info"
+# filter = "info"
+max_level = "debug"
+filter = "debug,hyper=info,reqwest=info,h2=info,tower=info"
 # rolling_file_path = "./logs"

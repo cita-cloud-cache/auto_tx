@@ -14,6 +14,7 @@ pub async fn get_task(
     State(state): State<Arc<AutoTxGlobalState>>,
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, RESTfulError> {
+    debug!("get_task");
     let init_hash = if let Some(init_hash) = headers.get("hash") {
         init_hash.to_str()?.to_string()
     } else {
@@ -35,12 +36,14 @@ pub async fn get_task(
             .map_err(|_| CALError::NotFound)?
     };
 
+    debug!("get_task init_hash: {}", init_hash);
     let task = state
         .storage
         .load_task(&init_hash)
         .await
         .map_err(|_| CALError::NotFound)?;
 
+    debug!("get_task task: {:?}", task);
     match task.status {
         Status::Uncheck | Status::Unsend => {
             state
@@ -48,6 +51,7 @@ pub async fn get_task(
                 .send_processing_task(&task.init_hash, &task.status)
                 .await
                 .ok();
+            debug!("get_task send_processing_task");
         }
         _ => {}
     }

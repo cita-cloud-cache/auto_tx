@@ -99,7 +99,7 @@ impl Storage {
         let _xgroup_create_result: Result<(), _> = conn
             .xgroup_create_mkstream(keys[0], &config.name, "0-0")
             .await
-            .map_err(|e| debug!("xgroup create error: {}", e));
+            .map_err(|e| trace!("xgroup create error: {}", e));
 
         let opts = streams::StreamReadOptions::default()
             .group(config.name.clone(), instance_name())
@@ -253,15 +253,20 @@ impl Storage {
     }
 
     pub async fn load_task(&self, init_hash: &str) -> Result<Task> {
+        debug!("init_hash: {}", init_hash);
         let base_data = self.load_base_data(init_hash).await?;
+        debug!("base_data: {:?}", base_data);
         let timeout = self.load_timeout(init_hash).await?;
+        debug!("timeout: {:?}", timeout);
         let gas = self.load_gas(init_hash).await?.gas;
+        debug!("gas: {:?}", gas);
         let hash_to_check = self.load_hash_to_check(init_hash).await.ok();
+        debug!("hash_to_check: {:?}", hash_to_check);
         let status = self
             .load_status(init_hash)
             .await
             .unwrap_or(Status::Completed);
-
+        debug!("status: {:?}", status);
         let task = Task {
             base_data,
             init_hash: init_hash.to_owned(),
@@ -271,7 +276,7 @@ impl Storage {
             result: self.load_task_result(init_hash).await.ok(),
             hash_to_check,
         };
-
+        debug!("task: {:?}", task);
         Ok(task)
     }
 

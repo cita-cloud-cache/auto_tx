@@ -1,31 +1,23 @@
 use crate::{send_tx::AutoTx, AutoTxGlobalState};
 
-use color_eyre::eyre::{OptionExt, Result};
+use color_eyre::eyre::Result;
 use common_rs::{
     error::CALError,
     restful::{
         axum::{
-            extract::{Query, State},
+            extract::{Path, State},
             response::IntoResponse,
         },
         ok, RESTfulError,
     },
 };
-use serde_json::Value;
 use std::sync::Arc;
 
 pub async fn get_receipt(
     State(state): State<Arc<AutoTxGlobalState>>,
-    Query(params): Query<Value>,
+    Path(chain_name): Path<String>,
+    Path(hash): Path<String>,
 ) -> Result<impl IntoResponse, RESTfulError> {
-    let hash = params
-        .get("hash")
-        .ok_or_eyre("hash is missing")?
-        .to_string();
-    let chain_name = params
-        .get("chain_name")
-        .ok_or_eyre("chain_name is missing")?
-        .to_string();
     // get Chain
     let mut chain = state.chains.get_chain(&chain_name).await?;
     let result = chain.chain_client.get_receipt(&hash).await.map_err(|e| {

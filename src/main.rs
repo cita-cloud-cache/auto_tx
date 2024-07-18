@@ -187,8 +187,8 @@ async fn run(opts: RunOpts) -> Result<()> {
     let state = Arc::new(AutoTxGlobalState::new(redis).await);
 
     let router = Router::new()
-        .route("/api/<chain_name>/send_tx", post(handle_send_tx))
-        .route("/api/<chain_name>/receipt/<hash>", get(get_receipt_handler))
+        .route("/api/:chain_name/send_tx", post(handle_send_tx))
+        .route("/api/:chain_name/receipt/:hash", get(get_receipt_handler))
         .route("/api/task", post(get_task_handler))
         .with_state(state.clone());
 
