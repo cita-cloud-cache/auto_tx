@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use common_rs::{log::LogConfig, redis::RedisConfig, service_register::ServiceRegisterConfig};
+use eldegoss::config::Config as EldegossConfig;
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 
@@ -72,6 +73,8 @@ pub struct Config {
 
     pub rpc_timeout: u64,
 
+    pub eldegoss_config: EldegossConfig,
+
     pub redis_config: RedisConfig,
 
     pub cita_create_config: Option<CitaCreateConfig>,
@@ -96,6 +99,7 @@ impl Default for Config {
             chain_config_ttl: 3,
             rpc_timeout: 1000,
             cita_create_config: None,
+            eldegoss_config: Default::default(),
             redis_config: Default::default(),
             service_register_config: Default::default(),
             request_key_ttl: 600,

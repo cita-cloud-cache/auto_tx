@@ -52,6 +52,7 @@ use common_rs::{
     },
 };
 use config::{get_config, Config};
+use eldegoss::eldegoss::Eldegoss;
 use once_cell::sync::OnceCell;
 use send_tx::handle_send_tx;
 use serde::{Deserialize, Serialize};
@@ -173,9 +174,14 @@ async fn run(opts: RunOpts) -> Result<()> {
         pending_task_interval,
         recycle_task_interval,
         recycle_task_num,
+        eldegoss_config,
         ..
     } = config.clone();
 
+    // eldegoss
+    let eldegoss = Eldegoss::serve(eldegoss_config).await?;
+
+    // redis
     let redis = redis::Redis::new(&config.redis_config).await?;
     if let Some(service_register_config) = &config.service_register_config {
         redis
@@ -216,6 +222,9 @@ async fn run(opts: RunOpts) -> Result<()> {
 
         loop {
             tokio::select! {
+                Ok(msg) = eldegoss.recv() => {
+                    
+                }
                 Ok(check_tasks) = state.storage.read_processing_task(&Status::Uncheck) => {
                     pending_check_task = check_tasks.is_empty();
                     if !pending_send_task {
