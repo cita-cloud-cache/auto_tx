@@ -170,6 +170,7 @@ async fn run(opts: RunOpts) -> Result<()> {
     let Config {
         name,
         port,
+        processing_task_interval,
         pending_task_interval,
         recycle_task_interval,
         recycle_task_num,
@@ -198,6 +199,12 @@ async fn run(opts: RunOpts) -> Result<()> {
     tokio::spawn(async move {
         let mut conn = state.storage.operator();
 
+        let mut read_processing_unsend_task_interval =
+            tokio::time::interval(tokio::time::Duration::from_secs(processing_task_interval));
+
+        let mut read_processing_uncheck_task_interval =
+            tokio::time::interval(tokio::time::Duration::from_secs(processing_task_interval));
+
         let mut pending_unsend_task_interval =
             tokio::time::interval(tokio::time::Duration::from_secs(pending_task_interval));
         pending_unsend_task_interval.tick().await;
@@ -216,44 +223,48 @@ async fn run(opts: RunOpts) -> Result<()> {
 
         loop {
             tokio::select! {
-                Ok(check_tasks) = state.storage.read_processing_task(&Status::Uncheck) => {
-                    pending_check_task = check_tasks.is_empty();
-                    if !pending_send_task {
-                        pending_uncheck_task_interval.reset();
-                        recycle_task_interval.reset();
+                _ = read_processing_unsend_task_interval.tick() => {
+                    if let Ok(send_tasks) = state.storage.read_processing_task(&Status::Unsend).await {
+                        pending_send_task = send_tasks.is_empty();
+                        if !send_tasks.is_empty() {
+                            pending_unsend_task_interval.reset();
+                            recycle_task_interval.reset();
 
-                        let mut tasks = vec![];
-                        check_tasks.iter().for_each( |(xid, init_hash)| {
-                            let state = state.clone();
-                            let init_hash = init_hash.to_string();
-                            let xid = xid.to_string();
-                            tasks.push((tokio::spawn(check_task(init_hash, state)), xid));
-                        });
+                            let mut tasks = vec![];
+                            send_tasks.iter().for_each( |(xid, init_hash)| {
+                                let state = state.clone();
+                                let init_hash = init_hash.to_string();
+                                let xid = xid.to_string();
+                                tasks.push((tokio::spawn(send_task(init_hash, state)), xid));
+                            });
 
-                        for (task, xid) in tasks {
-                            if task.await.is_ok() {
-                                state.storage.ack_pending_task(&Status::Uncheck, &xid).await.ok();
+                            for (task, xid) in tasks {
+                                if task.await.is_ok() {
+                                    state.storage.ack_pending_task(&Status::Unsend, &xid).await.ok();
+                                }
                             }
                         }
                     }
                 }
-                Ok(send_tasks) = state.storage.read_processing_task(&Status::Unsend) => {
-                    pending_send_task = send_tasks.is_empty();
-                    if !send_tasks.is_empty() {
-                        pending_unsend_task_interval.reset();
-                        recycle_task_interval.reset();
+                _ = read_processing_uncheck_task_interval.tick() => {
+                    if let Ok(check_tasks) = state.storage.read_processing_task(&Status::Uncheck).await {
+                        pending_check_task = check_tasks.is_empty();
+                        if !pending_send_task {
+                            pending_uncheck_task_interval.reset();
+                            recycle_task_interval.reset();
 
-                        let mut tasks = vec![];
-                        send_tasks.iter().for_each( |(xid, init_hash)| {
-                            let state = state.clone();
-                            let init_hash = init_hash.to_string();
-                            let xid = xid.to_string();
-                            tasks.push((tokio::spawn(send_task(init_hash, state)), xid));
-                        });
+                            let mut tasks = vec![];
+                            check_tasks.iter().for_each( |(xid, init_hash)| {
+                                let state = state.clone();
+                                let init_hash = init_hash.to_string();
+                                let xid = xid.to_string();
+                                tasks.push((tokio::spawn(check_task(init_hash, state)), xid));
+                            });
 
-                        for (task, xid) in tasks {
-                            if task.await.is_ok() {
-                                state.storage.ack_pending_task(&Status::Unsend, &xid).await.ok();
+                            for (task, xid) in tasks {
+                                if task.await.is_ok() {
+                                    state.storage.ack_pending_task(&Status::Uncheck, &xid).await.ok();
+                                }
                             }
                         }
                     }
