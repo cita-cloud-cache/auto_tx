@@ -9,13 +9,13 @@ edition = "2021"
 cita_cloud_proto = { package = "cita_cloud_proto", git = "https://github.com/cita-cloud/cloud-common-rs" }
 common-rs = { git = "https://github.com/cita-cloud-cache/common-rs", default-features = false, features = [
     "restful",
-    "redis",
     "config",
     "log",
 ] }
 web3 = { git = "https://github.com/cita-cloud-cache/rust-web3" }
 
-cita-tool = "0.21"
+bevy_reflect = "0.14"
+cita-tool = "0.22"
 clap = { version = "4.5", features = ["derive"] }
 color-eyre = "0.6"
 ethabi = "18.0"

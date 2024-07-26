@@ -18,7 +18,6 @@ use cita_cloud_proto::evm::{ByteQuota, Receipt};
 use cita_cloud_proto::executor::CallRequest;
 use cita_cloud_proto::status_code::StatusCodeEnum;
 use color_eyre::eyre::{eyre, Result};
-use common_rs::redis::AsyncCommands;
 use ethabi::ethereum_types::U256;
 use hex::ToHex;
 use prost::Message;
@@ -128,36 +127,38 @@ impl CitaCloudClient {
     }
 
     async fn get_system_config(&mut self, storage: Option<&Storage>) -> Result<SystemConfig> {
-        let key = format!("{}/ChainSysConfig/{}", get_config().name, self.chain_name);
-        if let Some(storage) = storage {
-            if let Ok(system_config_bytes) = storage.operator().get(key.clone()).await {
-                let system_config_bytes: Vec<u8> = system_config_bytes;
-                if !system_config_bytes.is_empty() {
-                    let system_config = SystemConfig::decode(&mut system_config_bytes.as_slice())?;
-                    return Ok(system_config);
-                }
-            }
-        }
+        // TODO cache system_config
+        // let key = format!("{}/ChainSysConfig/{}", get_config().name, self.chain_name);
+        // if let Some(storage) = storage {
+        //     if let Ok(system_config_bytes) = storage.operator().get(key.clone()).await {
+        //         let system_config_bytes: Vec<u8> = system_config_bytes;
+        //         if !system_config_bytes.is_empty() {
+        //             let system_config = SystemConfig::decode(&mut system_config_bytes.as_slice())?;
+        //             return Ok(system_config);
+        //         }
+        //     }
+        // }
         let mut client = self.controller_client.clone();
         let system_config = client
             .get_system_config(Empty {})
             .await
             .map(|response| response.into_inner())?;
-        if let Some(storage) = storage {
-            let system_config_bytes = {
-                let mut buf = Vec::with_capacity(system_config.encoded_len());
-                system_config.encode(&mut buf)?;
-                buf
-            };
-            storage
-                .operator()
-                .set_ex(
-                    key,
-                    system_config_bytes,
-                    get_config().chain_config_ttl as u64,
-                )
-                .await?;
-        }
+        // TODO cache system_config
+        // if let Some(storage) = storage {
+        //     let system_config_bytes = {
+        //         let mut buf = Vec::with_capacity(system_config.encoded_len());
+        //         system_config.encode(&mut buf)?;
+        //         buf
+        //     };
+        //     storage
+        //         .operator()
+        //         .set_ex(
+        //             key,
+        //             system_config_bytes,
+        //             get_config().chain_config_ttl as u64,
+        //         )
+        //         .await?;
+        // }
         Ok(system_config)
     }
 

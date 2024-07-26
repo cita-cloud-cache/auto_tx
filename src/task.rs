@@ -173,7 +173,7 @@ pub struct Task {
     pub hash_to_check: Option<HashToCheck>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SendTask {
     pub base_data: BaseData,
     pub timeout: Timeout,

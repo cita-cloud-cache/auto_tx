@@ -105,7 +105,9 @@ pub async fn send_cita_create(
         "functionHashList": FAKE_LIST,
     });
 
-    let resp = reqwest::Client::new()
+    let resp = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()?
         .post(&config.create_url)
         .headers(headers)
         .json(&body)

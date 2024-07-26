@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+
+use bevy_reflect::Reflect;
 use cita_tool::{Encryption, Hashable};
 use color_eyre::eyre::{eyre, Result};
 use ethabi::ethereum_types::H256;
@@ -30,20 +33,23 @@ struct AddrResponseData {
 }
 
 async fn get_user_address(user_code: &str, crypto_type: &str) -> Result<Vec<u8>> {
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()?;
     let kms_url = format!("{}/key", KMS.get().unwrap());
 
-    let data = serde_json::json!({
-        "user_code": user_code,
-        "crypto_type": crypto_type
-    });
+    let mut data = HashMap::new();
+    data.insert("user_code", user_code);
+    data.insert("crypto_type", crypto_type);
+
+    debug!("get_user_address data: {:?}", data);
 
     let resp = client
         .post(kms_url)
         .json(&data)
         .send()
         .await
-        .map_err(|e| eyre!("get_user_address err: {e}"))?
+        .map_err(|e| eyre!("get_user_address post err: {e}"))?
         .json::<AddrResponse>()
         .await
         .map_err(|e| eyre!("get_user_address err: {e}"))?;
@@ -67,6 +73,31 @@ async fn get_user_address(user_code: &str, crypto_type: &str) -> Result<Vec<u8>>
             resp.message
         ))
     }
+}
+
+#[test]
+fn test_get_user_address() -> Result<()> {
+    let user_code = "123";
+    let crypto_type = "SM2";
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()?;
+    let kms_url = "http://192.168.194.181/api/keys/key";
+
+    let mut data = HashMap::new();
+    data.insert("user_code", user_code);
+    data.insert("crypto_type", crypto_type);
+
+    debug!("get_user_address data: {:?}", data);
+
+    let _ = client
+        .post(kms_url)
+        .json(&data)
+        .send()
+        .map_err(|e| eyre!("get_user_address post err: {e}"))?
+        .json::<AddrResponse>()
+        .map_err(|e| eyre!("get_user_address err: {e}"))?;
+    Ok(())
 }
 
 #[derive(Deserialize, Debug)]
@@ -148,7 +179,7 @@ pub trait Kms {
     async fn sign(&self, msg: &str) -> Result<Vec<u8>>;
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Reflect, Serialize, Deserialize)]
 pub struct Account {
     user_code: String,
     crypto_type: String,

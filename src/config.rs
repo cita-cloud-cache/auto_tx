@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use common_rs::{log::LogConfig, redis::RedisConfig, service_register::ServiceRegisterConfig};
+use common_rs::{log::LogConfig, service_register::ServiceRegisterConfig};
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 
@@ -50,6 +50,8 @@ pub struct Config {
 
     pub kms_url: String,
 
+    pub store_url: String,
+
     pub log_config: LogConfig,
 
     pub read_send_num: usize,
@@ -72,8 +74,6 @@ pub struct Config {
 
     pub rpc_timeout: u64,
 
-    pub redis_config: RedisConfig,
-
     pub cita_create_config: Option<CitaCreateConfig>,
 
     pub service_register_config: Option<ServiceRegisterConfig>,
@@ -85,18 +85,18 @@ impl Default for Config {
             name: "auto_tx".to_string(),
             port: 3000,
             kms_url: Default::default(),
+            store_url: Default::default(),
             log_config: Default::default(),
             max_timeout: 600,
             read_send_num: 100,
             read_check_num: 10,
-            pending_task_interval: 120,
+            pending_task_interval: 1,
             check_retry_interval: 1,
             recycle_task_interval: 150,
             recycle_task_num: 100,
             chain_config_ttl: 3,
             rpc_timeout: 1000,
             cita_create_config: None,
-            redis_config: Default::default(),
             service_register_config: Default::default(),
             request_key_ttl: 600,
         }

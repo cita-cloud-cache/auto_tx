@@ -1,19 +1,20 @@
 name = "auto-api-latest"
-port = 3000
-kms_url = "http://kms-latest/api/keys"
+port = 3001
+kms_url = "http://192.168.194.181/api/keys"
+store_url = "http://192.168.12.55:3000/api"
 check_retry_interval = 2
-pending_task_interval = 20
+pending_task_interval = 1
 recycle_task_interval = 20
-recycle_task_num = 500
-read_send_num = 500
-read_check_num = 500
+recycle_task_num = 50
+read_send_num = 50
+read_check_num = 50
 request_key_ttl = 600
 chain_config_ttl = 600
 rpc_timeout = 2000
 
 [redis_config]
 endpoints = [
-    "redis://redis-cluster",
+    "redis://redis-cluster.chain-cache.svc.cluster.local",
 ]
 
 [service_register_config]
@@ -26,8 +27,8 @@ tags = [
 ]
 
 [log_config]
-# max_level = "info"
-# filter = "info"
-max_level = "debug"
-filter = "debug,hyper=info,reqwest=info,h2=info,tower=info"
+max_level = "info"
+filter = "info"
+# max_level = "debug"
+# filter = "debug,hyper=info,reqwest=info,h2=info,tower=info"
 # rolling_file_path = "./logs"

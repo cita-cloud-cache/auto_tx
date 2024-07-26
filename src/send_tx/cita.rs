@@ -10,7 +10,6 @@ use cita_tool::{
     UnverifiedTransaction,
 };
 use color_eyre::eyre::{eyre, Result};
-use common_rs::redis::AsyncCommands;
 use hex::ToHex;
 
 const CITA_BLOCK_LIMIT: u64 = 88;
@@ -57,18 +56,19 @@ impl CitaClient {
     }
 
     async fn get_block_interval(&self, storage: &Storage) -> Result<u64> {
-        let key = format!(
-            "{}/ChainSysConfig/{}/block_interval",
-            get_config().name,
-            self.chain_name
-        );
-        if let Ok(block_interval_bytes) = storage.operator().get(key.clone()).await {
-            let block_interval_bytes: Vec<u8> = block_interval_bytes;
-            if !block_interval_bytes.is_empty() {
-                let block_interval = u64::from_be_bytes(block_interval_bytes.try_into().unwrap());
-                return Ok(block_interval);
-            }
-        }
+        // TODO cache system_config
+        // let key = format!(
+        //     "{}/ChainSysConfig/{}/block_interval",
+        //     get_config().name,
+        //     self.chain_name
+        // );
+        // if let Ok(block_interval_bytes) = storage.operator().get(key.clone()).await {
+        //     let block_interval_bytes: Vec<u8> = block_interval_bytes;
+        //     if !block_interval_bytes.is_empty() {
+        //         let block_interval = u64::from_be_bytes(block_interval_bytes.try_into().unwrap());
+        //         return Ok(block_interval);
+        //     }
+        // }
         let resp = self
             .client
             .get_metadata("latest")
@@ -92,29 +92,31 @@ impl CitaClient {
                 ))
             }
         };
-        let block_interval_bytes = block_interval.to_be_bytes();
-        storage
-            .operator()
-            .set_ex(key, &block_interval_bytes, get_config().chain_config_ttl)
-            .await?;
+        // TODO cache system_config
+        // let block_interval_bytes = block_interval.to_be_bytes();
+        // storage
+        //     .operator()
+        //     .set_ex(key, &block_interval_bytes, get_config().chain_config_ttl)
+        //     .await?;
         Ok(block_interval)
     }
 
     pub async fn get_gas_limit(&self, storage: Option<&Storage>) -> Result<u64> {
-        let key = format!(
-            "{}/ChainSysConfig/{}/gas_limit",
-            get_config().name,
-            self.chain_name
-        );
-        if let Some(storage) = storage {
-            if let Ok(gas_limit_bytes) = storage.operator().get(key.clone()).await {
-                let gas_limit_bytes: Vec<u8> = gas_limit_bytes;
-                if !gas_limit_bytes.is_empty() {
-                    let gas_limit = u64::from_be_bytes(gas_limit_bytes.try_into().unwrap());
-                    return Ok(gas_limit);
-                }
-            }
-        }
+        // TODO cache system_config
+        // let key = format!(
+        //     "{}/ChainSysConfig/{}/gas_limit",
+        //     get_config().name,
+        //     self.chain_name
+        // );
+        // if let Some(storage) = storage {
+        //     if let Ok(gas_limit_bytes) = storage.operator().get(key.clone()).await {
+        //         let gas_limit_bytes: Vec<u8> = gas_limit_bytes;
+        //         if !gas_limit_bytes.is_empty() {
+        //             let gas_limit = u64::from_be_bytes(gas_limit_bytes.try_into().unwrap());
+        //             return Ok(gas_limit);
+        //         }
+        //     }
+        // }
         let resp = self
             .client
             .call(
@@ -140,96 +142,103 @@ impl CitaClient {
                 ))
             }
         };
-        if let Some(storage) = storage {
-            let gas_limit_bytes = gas_limit.to_be_bytes();
-            storage
-                .operator()
-                .set_ex(key, &gas_limit_bytes, get_config().chain_config_ttl)
-                .await?;
-        }
+        // TODO cache system_config
+        // if let Some(storage) = storage {
+        //     let gas_limit_bytes = gas_limit.to_be_bytes();
+        //     storage
+        //         .operator()
+        //         .set_ex(key, &gas_limit_bytes, get_config().chain_config_ttl)
+        //         .await?;
+        // }
         Ok(gas_limit)
     }
 
     async fn get_version(&self, storage: Option<&Storage>) -> Result<u32> {
-        let key = format!(
-            "{}/ChainSysConfig/{}/version",
-            get_config().name,
-            self.chain_name
-        );
-        if let Some(storage) = storage {
-            if let Ok(version_bytes) = storage.operator().get(key.clone()).await {
-                let version_bytes: Vec<u8> = version_bytes;
-                if !version_bytes.is_empty() {
-                    let version = u32::from_be_bytes(version_bytes.try_into().unwrap());
-                    return Ok(version);
-                }
-            }
-        }
+        // TODO cache system_config
+        // let key = format!(
+        //     "{}/ChainSysConfig/{}/version",
+        //     get_config().name,
+        //     self.chain_name
+        // );
+        // if let Some(storage) = storage {
+        //     if let Ok(version_bytes) = storage.operator().get(key.clone()).await {
+        //         let version_bytes: Vec<u8> = version_bytes;
+        //         if !version_bytes.is_empty() {
+        //             let version = u32::from_be_bytes(version_bytes.try_into().unwrap());
+        //             return Ok(version);
+        //         }
+        //     }
+        // }
         let version = self
             .client
             .get_version()
             .map_err(|_| eyre!("get_version failed"))?;
-        if let Some(storage) = storage {
-            let version_bytes = version.to_be_bytes();
-            storage
-                .operator()
-                .set_ex(key, &version_bytes, get_config().chain_config_ttl)
-                .await?;
-        }
+        // TODO cache system_config
+        // if let Some(storage) = storage {
+        //     let version_bytes = version.to_be_bytes();
+        //     storage
+        //         .operator()
+        //         .set_ex(key, &version_bytes, get_config().chain_config_ttl)
+        //         .await?;
+        // }
         Ok(version)
     }
 
     async fn get_chain_id(&mut self, storage: Option<&Storage>) -> Result<u32> {
-        let key = format!(
-            "{}/ChainSysConfig/{}/chain_id",
-            get_config().name,
-            self.chain_name
-        );
-        if let Some(storage) = storage {
-            if let Ok(chain_id_bytes) = storage.operator().get(key.clone()).await {
-                let chain_id_bytes: Vec<u8> = chain_id_bytes;
-                if !chain_id_bytes.is_empty() {
-                    let chain_id = u32::from_be_bytes(chain_id_bytes.try_into().unwrap());
-                    return Ok(chain_id);
-                }
-            }
-        }
+        // TODO cache system_config
+        // let key = format!(
+        //     "{}/ChainSysConfig/{}/chain_id",
+        //     get_config().name,
+        //     self.chain_name
+        // );
+        // if let Some(storage) = storage {
+        //     if let Ok(chain_id_bytes) = storage.operator().get(key.clone()).await {
+        //         let chain_id_bytes: Vec<u8> = chain_id_bytes;
+        //         if !chain_id_bytes.is_empty() {
+        //             let chain_id = u32::from_be_bytes(chain_id_bytes.try_into().unwrap());
+        //             return Ok(chain_id);
+        //         }
+        //     }
+        // }
         let chain_id = self
             .client
             .get_chain_id()
             .map_err(|_| eyre!("get_chain_id failed"))?;
-        if let Some(storage) = storage {
-            let chain_id_bytes = chain_id.to_be_bytes();
-            storage
-                .operator()
-                .set_ex(key, &chain_id_bytes, get_config().chain_config_ttl)
-                .await?;
-        }
+        // TODO cache system_config
+        // if let Some(storage) = storage {
+        //     let chain_id_bytes = chain_id.to_be_bytes();
+        //     storage
+        //         .operator()
+        //         .set_ex(key, &chain_id_bytes, get_config().chain_config_ttl)
+        //         .await?;
+        // }
         Ok(chain_id)
     }
     async fn get_chain_id_v1(&mut self, storage: Option<&Storage>) -> Result<Vec<u8>> {
-        let key = format!(
-            "{}/ChainSysConfig/{}/chain_id_v1",
-            get_config().name,
-            self.chain_name
-        );
-        if let Some(storage) = storage {
-            if let Ok(chain_id_v1) = storage.operator().get(key.clone()).await {
-                return Ok(chain_id_v1);
-            }
-        }
+        // TODO cache system_config
+        // let key = format!(
+        //     "{}/ChainSysConfig/{}/chain_id_v1",
+        //     get_config().name,
+        //     self.chain_name
+        // );
+        // if let Some(storage) = storage {
+        //     if let Ok(chain_id_v1) = storage.operator().get(key.clone()).await {
+        //         return Ok(chain_id_v1);
+        //     }
+        // }
         let chain_id = hex::decode(
             self.client
                 .get_chain_id_v1()
                 .map_err(|_| eyre!("get_chain_id_v1 failed"))?
                 .completed_lower_hex(),
         )?;
-        if let Some(storage) = storage {
-            storage
-                .operator()
-                .set_ex(key, chain_id.clone(), get_config().chain_config_ttl)
-                .await?;
-        }
+        // TODO cache system_config
+        // if let Some(storage) = storage {
+        //     storage
+        //         .operator()
+        //         .set_ex(key, chain_id.clone(), get_config().chain_config_ttl)
+        //         .await?;
+        // }
         Ok(chain_id)
     }
 

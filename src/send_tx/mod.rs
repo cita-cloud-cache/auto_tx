@@ -170,16 +170,20 @@ pub async fn handle(
     }
 
     let request_key = format!("{user_code}-{request_key}");
+    debug!("req_key: {request_key}");
 
     // check if request_key exists
-    if let Ok(init_hash) = state
+    match state
         .storage
         .load_init_hash_by_request_key(&request_key)
         .await
     {
-        return ok(json!({
-            "hash": init_hash
-        }));
+        Ok(init_hash) => {
+            return ok(json!({
+                "hash": init_hash
+            }));
+        }
+        Err(e) => debug!("not found init_hash by request_key: {e}"),
     }
 
     // get Chain

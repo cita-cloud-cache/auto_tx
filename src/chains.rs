@@ -15,9 +15,10 @@
 use crate::{
     config::get_config,
     send_tx::{cita::CitaClient, cita_cloud::CitaCloudClient, eth::EthClient},
+    storage::Storage,
 };
+use bevy_reflect::Reflect;
 use color_eyre::eyre::{eyre, Result};
-use common_rs::redis::{AsyncCommands, Redis};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt::Display, sync::Arc};
 use tokio::sync::RwLock;
@@ -39,7 +40,7 @@ impl Display for ChainClient {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize, Reflect)]
 pub struct ChainInfo {
     pub chain_type: String,
     pub crypto_type: String,
@@ -118,22 +119,20 @@ impl Chain {
 #[derive(Clone)]
 pub struct Chains {
     serve_chains: Arc<RwLock<HashMap<String, Chain>>>,
-    config_center: Redis,
+    storage: Storage,
 }
 
 impl Chains {
-    pub async fn new(redis: Redis) -> Self {
+    pub async fn new(storage: Storage) -> Self {
         let chains = HashMap::new();
         Self {
             serve_chains: Arc::new(RwLock::new(chains)),
-            config_center: redis,
+            storage,
         }
     }
 
     async fn request_chain_info(&self, chain_name: &str) -> Result<Chain> {
-        let key = format!("{}/ChainInfo/{}", get_config().name, chain_name);
-        let value: String = self.config_center.conn().get(key).await?;
-        let chain_info: ChainInfo = serde_json::from_str(&value)?;
+        let chain_info: ChainInfo = self.storage.get_chain_info(chain_name).await?;
         Chain::new(chain_name, chain_info).await
     }
 

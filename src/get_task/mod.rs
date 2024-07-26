@@ -33,17 +33,20 @@ pub async fn get_task(
             .storage
             .load_init_hash_by_request_key(&request_key)
             .await
-            .map_err(|_| CALError::NotFound)?
+            .map_err(|e| {
+                debug!("load_init_hash_by_request_key failed: {e}");
+                CALError::NotFound
+            })?
     };
 
     debug!("get_task init_hash: {}", init_hash);
-    let task = state
-        .storage
-        .load_task(&init_hash)
-        .await
-        .map_err(|_| CALError::NotFound)?;
+    let task = state.storage.load_task(&init_hash).await.map_err(|e| {
+        debug!("load_task failed: {e}");
+        CALError::NotFound
+    })?;
 
     debug!("get_task task: {:?}", task);
+    // send event
     match task.status {
         Status::Uncheck | Status::Unsend => {
             state
