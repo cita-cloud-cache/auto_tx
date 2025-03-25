@@ -1,7 +1,6 @@
 use crate::{chains::ChainInfo, config::get_config, task::*};
 use color_eyre::eyre::{eyre, OptionExt, Result};
 use paste::paste;
-use serde::Deserialize;
 use serde_json::{json, Value};
 
 #[derive(Clone)]
@@ -29,34 +28,6 @@ impl Storage {
             Err(eyre!("storage post failed"))
         }
     }
-
-    pub async fn get_struct<T: Default + bevy_reflect::Struct + for<'de> Deserialize<'de>>(
-        &self,
-        key: &str,
-    ) -> Result<T> {
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(5))
-            .build()?;
-        let url = format!("{}/kvs/r/{}/{}", self.url, self.prefix, key);
-        let mut fields = vec![];
-        let d = T::default();
-        for i in 0..d.field_len() {
-            if let Some(field) = d.name_at(i) {
-                fields.push(field);
-            }
-        }
-
-        let resp = client
-            .post(url)
-            .json(&json!(fields))
-            .send()
-            .await
-            .map_err(|e| eyre!("storage get http failed: {e}"))?;
-        debug!("get_struct resp: {:?}", resp);
-        resp.json::<T>()
-            .await
-            .map_err(|e| eyre!("storage get struct failed: {e}"))
-    }
 }
 
 macro_rules! store_and_load {
@@ -80,7 +51,7 @@ macro_rules! store_and_load {
                     if resp.status().is_success() && resp.json::<bool>().await.is_ok() {
                         Ok(())
                     } else {
-                        Err(eyre!("store_{} failed", $var_name))
+                        Err(eyre!("store_{} {init_hash} failed", $var_name))
                     }
                 }
 
@@ -99,7 +70,7 @@ macro_rules! store_and_load {
                             .map_err(|e| eyre!("load_{} failed: {e}", $var_name))?;
                         Ok(data)
                     } else {
-                        Err(eyre!("load_{} failed", $var_name))
+                        Err(eyre!("load_{} {init_hash} failed", $var_name))
                     }
                 }
 
@@ -144,20 +115,23 @@ impl Storage {
     }
 
     pub async fn send_processing_task(&self, init_hash: &str, status: &Status) -> Result<()> {
-        let status_path = match status {
-            Status::Unsend => "unsend",
-            Status::Uncheck => "uncheck",
+        let json = match status {
+            Status::Unsend => json!({
+                format!("unsend/{}", init_hash): 0,
+                format!("uncheck/{}", init_hash): ()
+            }),
+            Status::Uncheck => json!({
+                format!("unsend/{}", init_hash): (),
+                format!("uncheck/{}", init_hash): 0
+            }),
             Status::Completed => return Err(eyre!("task status is completed")),
         };
-        let url = format!(
-            "{}/kvs/w/{}/processing/{}",
-            self.url, self.prefix, status_path
-        );
+        let url = format!("{}/kvs/w/{}/processing", self.url, self.prefix);
         let resp = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(5))
             .build()?
             .post(url)
-            .json(&json!({ init_hash: 0 }))
+            .json(&json)
             .send()
             .await
             .map_err(|e| eyre!("send_processing_task post http failed: {e}"))?;
@@ -247,7 +221,7 @@ impl Storage {
             };
             Ok(check_task)
         } else {
-            Err(eyre!("task status is not Uncheck"))
+            Err(eyre!("task {init_hash} is not Uncheck"))
         }
     }
 
@@ -333,7 +307,7 @@ impl Storage {
         if resp.status().is_success() && resp.json::<bool>().await.is_ok() {
             Ok(())
         } else {
-            Err(eyre!("try_lock_task failed"))
+            Err(eyre!("try_lock_task {init_hash} failed"))
         }
     }
 

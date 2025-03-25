@@ -40,36 +40,17 @@ impl From<&SendTask> for TransactionParameters {
 
 #[derive(Clone, Debug)]
 pub struct EthClient {
-    chain_name: String,
     web3: Web3<Http>,
 }
 
 impl EthClient {
-    pub fn new(url: &str, name: &str) -> Result<Self> {
+    pub fn new(url: &str) -> Result<Self> {
         let transport = web3::transports::Http::new(url)?;
         let web3 = web3::Web3::new(transport);
-        Ok(Self {
-            web3,
-            chain_name: name.to_string(),
-        })
+        Ok(Self { web3 })
     }
 
-    pub async fn get_gas_limit(&self, storage: Option<&Storage>) -> Result<u64> {
-        // TODO cache system_config
-        // let key = format!(
-        //     "{}/ChainSysConfig/{}/gas_limit",
-        //     get_config().name,
-        //     self.chain_name
-        // );
-        // if let Some(storage) = storage {
-        //     if let Ok(gas_limit_bytes) = storage.operator().get(key.clone()).await {
-        //         let gas_limit_bytes: Vec<u8> = gas_limit_bytes;
-        //         if !gas_limit_bytes.is_empty() {
-        //             let gas_limit = u64::from_be_bytes(gas_limit_bytes.try_into().unwrap());
-        //             return Ok(gas_limit);
-        //         }
-        //     }
-        // }
+    pub async fn get_gas_limit(&self) -> Result<u64> {
         let gas_limit = (self
             .web3
             .eth()
@@ -152,8 +133,8 @@ impl EthClient {
         Gas { gas }
     }
 
-    pub async fn self_update_gas(&mut self, gas: Gas, storage: Option<&Storage>) -> Result<Gas> {
-        let quota_limit = self.get_gas_limit(storage).await?;
+    pub async fn self_update_gas(&mut self, gas: Gas) -> Result<Gas> {
+        let quota_limit = self.get_gas_limit().await?;
         let gas = gas.gas;
         if quota_limit == gas {
             Err(eyre!("reach quota_limit"))
@@ -300,7 +281,7 @@ impl AutoTx for EthClient {
                             if status == U64::from(0) && used.as_u64() == gas.gas =>
                         {
                             // self_update and resend
-                            match self.self_update_gas(gas, Some(storage)).await {
+                            match self.self_update_gas(gas).await {
                                 Ok(gas) => {
                                     storage.store_gas(init_hash, &gas).await?;
                                     storage.downgrade_to_unsend(init_hash).await?;

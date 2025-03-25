@@ -171,11 +171,8 @@ async fn run(opts: RunOpts) -> Result<()> {
     let service_name = config.name.clone();
 
     let Config {
-        name,
         port,
         pending_task_interval,
-        recycle_task_interval,
-        recycle_task_num,
         ..
     } = config.clone();
 

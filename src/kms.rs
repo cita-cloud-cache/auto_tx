@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use bevy_reflect::Reflect;
 use cita_tool::{Encryption, Hashable};
 use color_eyre::eyre::{eyre, Result};
 use ethabi::ethereum_types::H256;
@@ -179,7 +178,7 @@ pub trait Kms {
     async fn sign(&self, msg: &str) -> Result<Vec<u8>>;
 }
 
-#[derive(Clone, Debug, Default, Reflect, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Account {
     user_code: String,
     crypto_type: String,

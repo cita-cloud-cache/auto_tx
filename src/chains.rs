@@ -13,11 +13,9 @@
 // limitations under the License.
 
 use crate::{
-    config::get_config,
     send_tx::{cita::CitaClient, cita_cloud::CitaCloudClient, eth::EthClient},
     storage::Storage,
 };
-use bevy_reflect::Reflect;
 use color_eyre::eyre::{eyre, Result};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt::Display, sync::Arc};
@@ -40,7 +38,7 @@ impl Display for ChainClient {
     }
 }
 
-#[derive(Clone, Default, Serialize, Deserialize, Reflect)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub struct ChainInfo {
     pub chain_type: String,
     pub crypto_type: String,
@@ -79,25 +77,25 @@ impl Chain {
         let chain_type = chain_info.chain_type.to_lowercase();
         let chain_client = match chain_type.as_str() {
             "cita-cloud" => {
-                let mut client = CitaCloudClient::new(&chain_info.chain_url, chain_name)?;
+                let mut client = CitaCloudClient::new(&chain_info.chain_url)?;
                 client
-                    .get_gas_limit(None)
+                    .get_gas_limit()
                     .await
                     .map_err(|_| eyre!("cita-cloud url check failed"))?;
                 ChainClient::CitaCloud(client)
             }
             "cita" => {
-                let client = CitaClient::new(&chain_info.chain_url, chain_name)?;
+                let client = CitaClient::new(&chain_info.chain_url)?;
                 client
-                    .get_gas_limit(None)
+                    .get_gas_limit()
                     .await
                     .map_err(|_| eyre!("cita url check failed"))?;
                 ChainClient::Cita(client)
             }
             "eth" => {
-                let client = EthClient::new(&chain_info.chain_url, chain_name)?;
+                let client = EthClient::new(&chain_info.chain_url)?;
                 client
-                    .get_gas_limit(None)
+                    .get_gas_limit()
                     .await
                     .map_err(|_| eyre!("eth url check failed"))?;
                 ChainClient::Eth(client)

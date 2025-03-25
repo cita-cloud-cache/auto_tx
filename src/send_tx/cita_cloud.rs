@@ -76,7 +76,6 @@ async fn get_raw_tx(
 
 #[derive(Clone, Debug)]
 pub struct CitaCloudClient {
-    pub chain_name: String,
     pub controller_client: ControllerRpcServiceClient<InterceptedSvc>,
     pub evm_client: EvmRpcServiceClient<InterceptedSvc>,
 }
@@ -108,7 +107,7 @@ cita_cloud_method!(get_transaction_receipt, Receipt, evm_client, Hash);
 cita_cloud_method!(estimate_quota, ByteQuota, evm_client, CallRequest);
 
 impl CitaCloudClient {
-    pub fn new(url: &str, name: &str) -> Result<Self> {
+    pub fn new(url: &str) -> Result<Self> {
         let controller_addr = url.to_string() + ":50004";
         let controller_client = ClientOptions::new("controller".to_string(), controller_addr)
             .connect_rpc()?
@@ -120,62 +119,31 @@ impl CitaCloudClient {
             .get_client()
             .clone();
         Ok(Self {
-            chain_name: name.to_owned(),
             controller_client,
             evm_client,
         })
     }
 
-    async fn get_system_config(&mut self, storage: Option<&Storage>) -> Result<SystemConfig> {
-        // TODO cache system_config
-        // let key = format!("{}/ChainSysConfig/{}", get_config().name, self.chain_name);
-        // if let Some(storage) = storage {
-        //     if let Ok(system_config_bytes) = storage.operator().get(key.clone()).await {
-        //         let system_config_bytes: Vec<u8> = system_config_bytes;
-        //         if !system_config_bytes.is_empty() {
-        //             let system_config = SystemConfig::decode(&mut system_config_bytes.as_slice())?;
-        //             return Ok(system_config);
-        //         }
-        //     }
-        // }
+    async fn get_system_config(&mut self) -> Result<SystemConfig> {
         let mut client = self.controller_client.clone();
         let system_config = client
             .get_system_config(Empty {})
             .await
             .map(|response| response.into_inner())?;
-        // TODO cache system_config
-        // if let Some(storage) = storage {
-        //     let system_config_bytes = {
-        //         let mut buf = Vec::with_capacity(system_config.encoded_len());
-        //         system_config.encode(&mut buf)?;
-        //         buf
-        //     };
-        //     storage
-        //         .operator()
-        //         .set_ex(
-        //             key,
-        //             system_config_bytes,
-        //             get_config().chain_config_ttl as u64,
-        //         )
-        //         .await?;
-        // }
+
         Ok(system_config)
     }
 
-    pub async fn get_gas_limit(&mut self, storage: Option<&Storage>) -> Result<u64> {
-        let system_config = self.get_system_config(storage).await?;
+    pub async fn get_gas_limit(&mut self) -> Result<u64> {
+        let system_config = self.get_system_config().await?;
         let gas_limit = system_config.quota_limit as u64;
         Ok(gas_limit)
     }
 
-    pub async fn try_update_timeout(
-        &mut self,
-        timeout: Timeout,
-        storage: &Storage,
-    ) -> Result<Timeout> {
+    pub async fn try_update_timeout(&mut self, timeout: Timeout) -> Result<Timeout> {
         let mut timeout = timeout.get_cita_timeout();
 
-        let system_config = self.get_system_config(Some(storage)).await?;
+        let system_config = self.get_system_config().await?;
         let block_interval = system_config.block_interval;
         let block_limit = system_config.block_limit;
         let current_height = self
@@ -217,7 +185,7 @@ impl CitaCloudClient {
         }
     }
 
-    pub async fn estimate_gas(&mut self, init_task: &InitTaskParam, storage: &Storage) -> Gas {
+    pub async fn estimate_gas(&mut self, init_task: &InitTaskParam) -> Gas {
         match init_task.base_data.tx_data.tx_type() {
             TxType::Store => Gas {
                 // 200 gas per byte
@@ -225,10 +193,7 @@ impl CitaCloudClient {
                 gas: ((init_task.base_data.tx_data.data.len() * 200) as u64 + BASE_QUOTA) / 2 * 3,
             },
             t => {
-                let quota_limit = self
-                    .get_gas_limit(Some(storage))
-                    .await
-                    .unwrap_or(DEFAULT_QUOTA_LIMIT);
+                let quota_limit = self.get_gas_limit().await.unwrap_or(DEFAULT_QUOTA_LIMIT);
                 let to = match t {
                     TxType::Create => vec![0u8; 20],
                     TxType::Store => unreachable!(),
@@ -265,8 +230,8 @@ impl CitaCloudClient {
         }
     }
 
-    pub async fn self_update_gas(&mut self, gas: Gas, storage: &Storage) -> Result<Gas> {
-        let quota_limit = self.get_gas_limit(Some(storage)).await?;
+    pub async fn self_update_gas(&mut self, gas: Gas) -> Result<Gas> {
+        let quota_limit = self.get_gas_limit().await?;
         let gas = gas.gas;
         if quota_limit == gas {
             Err(eyre!("reach quota_limit"))
@@ -289,11 +254,11 @@ impl AutoTx for CitaCloudClient {
             remain_time: init_task.timeout,
             valid_until_block: 0,
         });
-        let timeout = self.try_update_timeout(timeout, storage).await?;
+        let timeout = self.try_update_timeout(timeout).await?;
 
         // get Gas
         let gas = if init_task.gas <= BASE_QUOTA {
-            self.estimate_gas(init_task, storage).await
+            self.estimate_gas(init_task).await
         } else {
             Gas { gas: init_task.gas }
         };
@@ -308,7 +273,7 @@ impl AutoTx for CitaCloudClient {
         let mut cita_cloud_tx = CitaCloudTransaction::from(&send_task);
 
         // update args
-        let system_config = self.get_system_config(Some(storage)).await?;
+        let system_config = self.get_system_config().await?;
         cita_cloud_tx.version = system_config.version;
         cita_cloud_tx.chain_id = system_config.chain_id;
 
@@ -347,7 +312,7 @@ impl AutoTx for CitaCloudClient {
             // get tx
             let mut cita_cloud_tx = CitaCloudTransaction::from(task);
             // update args
-            let system_config = self.get_system_config(Some(storage)).await?;
+            let system_config = self.get_system_config().await?;
             cita_cloud_tx.version = system_config.version;
             cita_cloud_tx.chain_id = system_config.chain_id;
 
@@ -389,7 +354,7 @@ impl AutoTx for CitaCloudClient {
                 if e.to_string().contains("DupTransaction") {
                     return Ok(init_hash.to_string());
                 }
-                match self.try_update_timeout(timeout, storage).await {
+                match self.try_update_timeout(timeout).await {
                     Ok(new_timeout) => {
                         debug!("{init_hash} new_timeout: {new_timeout} ");
                         if timeout != new_timeout {
@@ -457,7 +422,7 @@ impl AutoTx for CitaCloudClient {
                 "Out of quota." => {
                     // self_update and resend
                     let gas = storage.load_gas(init_hash).await?;
-                    match self.self_update_gas(gas, storage).await {
+                    match self.self_update_gas(gas).await {
                         Ok(gas) => {
                             storage.store_gas(init_hash, &gas).await?;
                             storage.downgrade_to_unsend(init_hash).await?;
@@ -502,7 +467,7 @@ impl AutoTx for CitaCloudClient {
                     init_hash,
                     timeout.get_cita_timeout().remain_time
                 );
-                match self.try_update_timeout(timeout, storage).await {
+                match self.try_update_timeout(timeout).await {
                     Ok(new_timeout) => {
                         if timeout != new_timeout {
                             storage.store_timeout(init_hash, &new_timeout).await?;
