@@ -94,6 +94,7 @@ impl AutoTx for ChainClient {
 
 #[handler]
 pub async fn handle_send_tx(depot: &Depot, req: &mut Request) -> Result<impl Writer, RESTfulError> {
+    info!("into handle_send_tx");
     let headers = req.headers().clone();
     let request_key = headers
         .get("request_key")
@@ -111,9 +112,12 @@ pub async fn handle_send_tx(depot: &Depot, req: &mut Request) -> Result<impl Wri
     let state = depot
         .obtain::<Arc<AutoTxGlobalState>>()
         .map_err(|e| eyre!("get app_state failed: {e:?}"))?;
+    info!("get app_state success");
 
     let chain_name = req.param::<String>("chain_name").unwrap();
     let params = req.parse_body().await?;
+
+    info!("parse_body success");
     handle(state, request_key, user_code, chain_name, params)
         .await
         .map_err(|e| {
